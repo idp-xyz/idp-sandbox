@@ -85,7 +85,11 @@ out = structured(r).get("stdout", "")
 GVISOR = os.environ.get("EXPECT_GVISOR") == "1"
 # gVisor's /proc/self/status has no NoNewPrivs line (its kernel is its own); everything else must hold
 check("unprivileged", "uid 65534" in out and "CapEff:\t0000000000000000" in out and ("NoNewPrivs:\tabsent" if GVISOR else "NoNewPrivs:\t1") in out and "root read-only" in out, out)
-check("kernel-as-expected", ("kernel Linux version 4.4.0" in out) if GVISOR else ("kernel Linux version 4.4.0" not in out), out)
+KATA = os.environ.get("EXPECT_KATA") == "1"
+if KATA:   # a Kata guest runs its own kernel, not the node's (6.18.54.1-microsoft-standard-WSL2 here)
+    check("kernel-as-expected", "kernel Linux version 6.18.56 " in out, out)
+else:
+    check("kernel-as-expected", ("kernel Linux version 4.4.0" in out) if GVISOR else ("kernel Linux version 4.4.0" not in out), out)
 check("no-network", "internet blocked" in out and "api blocked" in out and "sandbox-service blocked" in out and "CONNECTED" not in out, out)
 check("no-service-account-token", "sa token False" in out, out)
 
@@ -97,7 +101,8 @@ check("loop-times-out", structured(r).get("timedOut") is True, r)
 r = run(ws, "import sys\nwhile True: sys.stdout.write('A'*65536)", timeoutSeconds=6)
 check("output-capped", len(structured(r).get("stdout", "")) <= 64 * 1024 + 16, len(structured(r).get("stdout", "")))
 r = run(ws, "import errno\ntry:\n    with open('/tmp/fill','wb') as f:\n        while True: f.write(b'x'*(1<<20)); f.flush()\nexcept OSError as e:\n    print('tmp full', errno.errorcode.get(e.errno))")
-check("tmp-quota", "tmp full ENOSPC" in structured(r).get("stdout", ""), r)
+# in a Kata guest the memory-backed emptyDir is not size-limited by the kubelet: the write runs into the pod's memory limit
+check("tmp-quota", "tmp full ENOSPC" in structured(r).get("stdout", "") or (KATA and structured(r).get("outOfMemory") is True), r)
 
 # the cluster's view of a running pod
 th = threading.Thread(target=lambda: run(ws, "import time; time.sleep(25)"))
