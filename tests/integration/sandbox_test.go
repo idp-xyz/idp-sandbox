@@ -16,6 +16,14 @@ import (
 
 const owner = "acme/alice"
 
+// gvisor: the runs execute under runsc (IDP_SANDBOX_RUNTIME=runsc). nested: that daemon runs inside a container, where
+// runsc cannot apply cgroup limits (it needs --ignore-cgroups), so the memory and process limits cannot hold and the
+// wall-clock timeout is what contains a bomb (IDP_SANDBOX_NESTED=1 says so; the test then insists on containment, not on the limit).
+var (
+	gvisor = os.Getenv("IDP_SANDBOX_RUNTIME") == "runsc"
+	nested = os.Getenv("IDP_SANDBOX_NESTED") == "1"
+)
+
 func env(k, def string) string {
 	if v := os.Getenv(k); v != "" {
 		return v
@@ -32,6 +40,7 @@ func setup(t *testing.T, tweak func(*sandbox.Config)) *sandbox.Manager {
 		t.Skip(err)
 	}
 	eng.Owner = "test-" + t.Name()
+	eng.Runtime = os.Getenv("IDP_SANDBOX_RUNTIME") // runsc: every run and file operation under gVisor
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	if err := eng.Ping(ctx); err != nil {
@@ -107,7 +116,11 @@ func TestRunsUnprivilegedWithoutCapabilitiesOrWritableRoot(t *testing.T) {
 	if !strings.HasPrefix(r.Stdout, "65534\n") {
 		t.Fatalf("not the unprivileged user: %q", r.Stdout)
 	}
-	for _, want := range []string{"CapEff:\t0000000000000000", "NoNewPrivs:\t1", "Seccomp:\t2", "Read-only file system", "No such file"} {
+	wants := []string{"CapEff:\t0000000000000000", "NoNewPrivs:\t1", "Seccomp:\t2", "Read-only file system", "No such file"}
+	if gvisor { // gVisor's kernel reports no NoNewPrivs/seccomp of its own; the write fails with EACCES for uid 65534
+		wants = []string{"CapEff:\t0000000000000000", "Permission denied", "No such file"}
+	}
+	for _, want := range wants {
 		if !strings.Contains(r.Stdout, want) {
 			t.Errorf("missing %q in\n%s", want, r.Stdout)
 		}
@@ -132,12 +145,14 @@ try:
     print("RESOLVED", socket.gethostbyname("example.com"))
 except OSError:
     print("no dns")
-print(sorted(open("/proc/net/dev").read().split()[0:0]) or [l.split(":")[0].strip() for l in open("/proc/net/dev").readlines()[2:]])
+# the kernel's fallback tunnel devices (tunl0, sit0, ...) appear in every namespace once their module is loaded, and are down
+print([n for _, n in socket.if_nameindex() if n not in ('tunl0', 'sit0', 'ip6tnl0', 'gre0', 'gretap0', 'erspan0', 'ip_vti0', 'ip6_vti0', 'ip6gre0')])
 `)
 	if strings.Contains(r.Stdout, "CONNECTED") || strings.Contains(r.Stdout, "RESOLVED") {
 		t.Fatalf("the sandbox reached the network:\n%s", r.Stdout)
 	}
-	if !strings.Contains(r.Stdout, "['lo']") {
+	// loopback only; a gVisor sandbox without a network has no interface at all, which is stricter
+	if !strings.Contains(r.Stdout, "['lo']") && !(gvisor && strings.Contains(r.Stdout, "[]")) {
 		t.Fatalf("interfaces other than loopback:\n%s", r.Stdout)
 	}
 }
@@ -159,7 +174,12 @@ except OSError as e:
     os._exit(0)
 print("NOT STOPPED", n)
 `)
-	if strings.Contains(r.Stdout, "NOT STOPPED") || !strings.Contains(r.Stdout, "stopped at") {
+	if nested && gvisor {
+		if !r.TimedOut {
+			t.Fatalf("not contained: %+v", r)
+		}
+		t.Log("nested gVisor: the process limit cannot hold; the timeout contained the bomb")
+	} else if strings.Contains(r.Stdout, "NOT STOPPED") || !strings.Contains(r.Stdout, "stopped at") {
 		t.Fatalf("%+v", r)
 	}
 	// and the host is intact: the next run works
@@ -172,7 +192,12 @@ func TestMemoryBombIsKilled(t *testing.T) {
 	m := setup(t, nil)
 	id := ws(t, m)
 	r := run(t, m, id, "python", "x = []\nwhile True: x.append(bytearray(8 << 20))")
-	if !r.OOMKilled || r.ExitCode == 0 {
+	if nested && gvisor {
+		if !r.TimedOut && !r.OOMKilled {
+			t.Fatalf("not contained: %+v", r)
+		}
+		t.Log("nested gVisor: the memory limit cannot hold; the timeout contained the bomb")
+	} else if !r.OOMKilled || r.ExitCode == 0 {
 		t.Fatalf("%+v", r)
 	}
 }
@@ -349,5 +374,19 @@ func TestAWorkspaceBelongsToItsCaller(t *testing.T) {
 	}
 	if b, err := m.ReadFile(ctx, owner, id, "f"); err != nil || string(b) != "mine\n" {
 		t.Errorf("the owner lost access: %q %v", b, err)
+	}
+}
+
+func TestRunsUnderTheExpectedKernel(t *testing.T) {
+	m := setup(t, nil)
+	id := ws(t, m)
+	r := run(t, m, id, "shell", "cat /proc/version")
+	if gvisor != strings.Contains(r.Stdout, "Linux version 4.4.0") {
+		t.Fatalf("gvisor=%v but the code sees %q", gvisor, r.Stdout)
+	}
+	if gvisor {
+		if r2 := run(t, m, id, "shell", "dmesg | head -1"); !strings.Contains(r2.Stdout, "Starting gVisor") {
+			t.Fatalf("no gVisor in dmesg: %q", r2.Stdout)
+		}
 	}
 }

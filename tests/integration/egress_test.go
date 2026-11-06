@@ -60,6 +60,7 @@ func egressSetup(t *testing.T) *sandbox.Manager {
 		t.Skip(err)
 	}
 	eng.Owner = "test-" + suffix
+	eng.Runtime = os.Getenv("IDP_SANDBOX_RUNTIME")
 	eng.EgressProxy, eng.EgressPort = proxy, 3128
 	cfg := sandbox.DefaultConfig(py, shell)
 	cfg.Limits.Timeout = 15 * time.Second
@@ -154,7 +155,6 @@ func TestEgressRunsDoNotSeeEachOther(t *testing.T) {
 		defer wg.Done()
 		ra = runEgress(t, m, a, `
 import socket, time
-ip = [l for l in open("/proc/net/fib_trie").read().split("\n") if "/32 host" in l]
 s = socket.gethostbyname(socket.gethostname())
 srv = socket.socket(); srv.bind(("0.0.0.0", 9000)); srv.listen(5)
 open("ip.txt", "w").write(s)

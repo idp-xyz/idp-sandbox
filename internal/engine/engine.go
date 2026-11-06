@@ -287,7 +287,9 @@ func (e *Engine) Run(ctx context.Context, spec sandbox.RunSpec) (sandbox.RunResu
 		}
 		defer net.remove(e)
 		network = net.name
-		proxy := fmt.Sprintf("http://%s:%d", e.EgressProxy, e.EgressPort)
+		// the proxy's address on this run's network, by IP: gVisor's own network stack does not apply Docker's
+		// embedded-DNS rewrite, so a container name may not resolve inside a sandbox
+		proxy := fmt.Sprintf("http://%s:%d", net.proxyIP, e.EgressPort)
 		env = append(env, "HTTP_PROXY="+proxy, "HTTPS_PROXY="+proxy, "http_proxy="+proxy, "https_proxy="+proxy)
 	}
 	cfg := map[string]any{
@@ -528,7 +530,7 @@ func (b *bufConn) CloseWrite() error {
 // runNet is a run's own internal network: no route out, only the egress proxy attached. Per run, so that
 // concurrent runs of different callers cannot reach each other (an internal network has no gateway, and a
 // shared one would let containers talk to one another).
-type runNet struct{ id, name string }
+type runNet struct{ id, name, proxyIP string }
 
 func (e *Engine) runNetwork(ctx context.Context) (*runNet, error) {
 	var b [8]byte
@@ -547,6 +549,22 @@ func (e *Engine) runNetwork(ctx context.Context) (*runNet, error) {
 	if err := e.json(ctx, http.MethodPost, "/networks/"+n.id+"/connect", nil, map[string]any{"Container": e.EgressProxy}, nil); err != nil {
 		n.remove(e)
 		return nil, fmt.Errorf("egress proxy %s: %w", e.EgressProxy, err)
+	}
+	var insp struct {
+		Containers map[string]struct{ IPv4Address string }
+	}
+	if err := e.json(ctx, http.MethodGet, "/networks/"+n.id, nil, nil, &insp); err != nil {
+		n.remove(e)
+		return nil, err
+	}
+	for _, c := range insp.Containers {
+		if ip, _, ok := strings.Cut(c.IPv4Address, "/"); ok && ip != "" {
+			n.proxyIP = ip // the only container on the network is the proxy
+		}
+	}
+	if n.proxyIP == "" {
+		n.remove(e)
+		return nil, fmt.Errorf("egress proxy %s has no address on the run's network", e.EgressProxy)
 	}
 	return n, nil
 }
