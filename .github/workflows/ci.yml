@@ -20,7 +20,7 @@ jobs:
           go-version: '1.26'
       - name: Format, vet, unit tests
         run: make test
-      - name: Isolation tests (real containers: network, fork bomb, memory, disk, symlinks, escapes)
+      - name: Isolation tests on real containers (network, fork bomb, memory, disk, symlinks, escapes)
         run: make test-integration
       - name: Image builds
         run: bash deploy/build.sh idp-sandbox:ci
