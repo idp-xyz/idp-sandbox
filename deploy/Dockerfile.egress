@@ -1,0 +1,4 @@
+FROM scratch
+COPY idp-sandbox-egress /idp-sandbox-egress
+USER 65532:65532
+ENTRYPOINT ["/idp-sandbox-egress"]

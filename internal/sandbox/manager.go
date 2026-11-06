@@ -30,11 +30,14 @@ type Config struct {
 	// RequireOwner refuses calls that carry no caller identity (the default); without it every anonymous
 	// call shares one owner and a workspace id is a bearer capability, as in ADR-0001 §5 before D11.
 	RequireOwner bool
-	IdleTTL      time.Duration // a workspace nobody used for this long is removed
-	MaxLifetime  time.Duration
-	MaxCodeBytes int
-	MaxFileBytes int64
-	Namespace    string // prefix of workspace names
+	// EgressEnabled lets a run ask for network=egress: access to the operator's allow-listed hosts through the
+	// egress proxy. Off unless the operator configured a proxy.
+	EgressEnabled bool
+	IdleTTL       time.Duration // a workspace nobody used for this long is removed
+	MaxLifetime   time.Duration
+	MaxCodeBytes  int
+	MaxFileBytes  int64
+	Namespace     string // prefix of workspace names
 }
 
 // DefaultConfig is conservative: 256 MiB, one CPU, 64 processes, 20 s, 64 KiB of output, 64 MiB workspace.
@@ -192,7 +195,10 @@ func (m *Manager) Delete(ctx context.Context, owner, id string) error {
 }
 
 // Run executes code in the workspace. timeout 0 means the default; it is capped at the configured one.
-func (m *Manager) Run(ctx context.Context, owner, id, language, code string, timeout time.Duration) (RunResult, error) {
+func (m *Manager) Run(ctx context.Context, owner, id, language, code string, timeout time.Duration, egress bool) (RunResult, error) {
+	if egress && !m.cfg.EgressEnabled {
+		return RunResult{}, ErrNoEgress
+	}
 	lang, ok := m.cfg.Languages[language]
 	if !ok {
 		return RunResult{}, fmt.Errorf("%w: language %q is not offered", ErrInvalid, language)
@@ -219,7 +225,7 @@ func (m *Manager) Run(ctx context.Context, owner, id, language, code string, tim
 		return RunResult{}, err
 	}
 	res, err := m.be.Run(ctx, RunSpec{Workspace: name, Image: lang.Image, Cmd: lang.Command("/work/" + file),
-		Limits: m.cfg.Limits, Timeout: timeout})
+		Limits: m.cfg.Limits, Timeout: timeout, Egress: egress})
 	return res, err
 }
 

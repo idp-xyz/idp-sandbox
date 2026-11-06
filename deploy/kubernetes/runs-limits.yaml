@@ -1,0 +1,32 @@
+# Bounds on the runs namespace, whatever the service (or a bug in it) asks for. Sized for the defaults:
+# 8 concurrent runs of 1 CPU / 256 MiB, up to 64 workspaces of 64 MiB.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: idp-sandbox-runs
+  namespace: idp-sandbox-runs
+spec:
+  hard:
+    pods: "24"
+    count/jobs.batch: "48"
+    configmaps: "48"
+    persistentvolumeclaims: "96"
+    requests.storage: 8Gi
+    requests.cpu: "12"
+    requests.memory: 12Gi
+    limits.cpu: "12"
+    limits.memory: 12Gi
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: idp-sandbox-runs
+  namespace: idp-sandbox-runs
+spec:
+  limits:
+    - type: Container
+      default: {cpu: 500m, memory: 128Mi}
+      defaultRequest: {cpu: 100m, memory: 64Mi}
+      max: {cpu: "2", memory: 1Gi}
+    - type: PersistentVolumeClaim
+      max: {storage: 1Gi}

@@ -1,0 +1,84 @@
+# Two namespaces, default deny in both, then exactly the flows needed.
+#
+# idp-sandbox (the service): ingress on 8570 from the idp-mcp gateway only (the service has no
+# authentication of its own, ADR D8: this policy IS the boundary); egress to the API server and DNS.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: idp-sandbox
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: idp-sandbox
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sandbox
+  namespace: idp-sandbox
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: sandbox
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: idp-mcp
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/component: gateway
+      ports:
+        - {protocol: TCP, port: 8570}
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 203.0.113.20/32       # the Kubernetes API server: the control-plane endpoint (kubectl get endpoints kubernetes); replace
+      ports:
+        - {protocol: TCP, port: 6443}
+        - {protocol: TCP, port: 443}
+---
+# idp-sandbox-runs (the untrusted code): nothing in, nothing out. NetworkPolicies only add, so this
+# can only be weakened by someone writing another policy that selects these pods, which review must catch.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: idp-sandbox-runs
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: run-pods-no-network
+  namespace: idp-sandbox-runs
+spec:
+  podSelector:
+    matchExpressions:
+      - {key: idp.sandbox/role, operator: In, values: [run, file]}
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress: []

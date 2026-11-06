@@ -14,9 +14,23 @@ services:
       IDP_SANDBOX_PRIVATE_NETWORK: 'true'
       IDP_SANDBOX_METRICS: 0.0.0.0:9570
       IDP_SANDBOX_OWNER: e2e
+      IDP_SANDBOX_EGRESS_PROXY: ${IDP_SANDBOX_EGRESS_PROXY:-}   # idp-sandbox-egress with --profile egress
       IDP_SANDBOX_PYTHON_IMAGE: ${IDP_SANDBOX_PYTHON_IMAGE:-public.ecr.aws/docker/library/python:3.12-slim}
       IDP_SANDBOX_SHELL_IMAGE: ${IDP_SANDBOX_SHELL_IMAGE:-public.ecr.aws/docker/library/alpine:3.22}
   registry:
     environment:
       IDP_ALLOWED_UPSTREAM_HOSTS: minimal,reference,sandbox
       IDP_PRIVATE_UPSTREAM_HOSTS: minimal,reference,sandbox
+  # OPTIONAL (docker compose --profile egress): the allow-listed egress proxy and the sandbox pointed at it, which
+  # adds the network=egress option to sandbox_run (a change of the tool's schema: the gateway pins it, so discover
+  # and re-approve the server). IDP_EGRESS_HOSTS is the allow-list (exact names or *.suffix); empty denies all.
+  sandbox-egress:
+    profiles: [egress]
+    image: ${IDP_SANDBOX_EGRESS_IMAGE:-idp-sandbox-egress:dev}
+    container_name: idp-sandbox-egress
+    networks: [edge]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    environment:
+      IDP_EGRESS_HOSTS: ${IDP_EGRESS_HOSTS:-}

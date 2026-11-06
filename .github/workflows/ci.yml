@@ -26,3 +26,18 @@ jobs:
         run: make test-integration
       - name: Image builds
         run: bash deploy/build.sh idp-sandbox:ci
+
+  kubernetes:
+    name: the Kubernetes backend on kind
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: kind
+      - name: The backend against a real cluster (hardening, NetworkPolicy, limits, isolation, clean-up)
+        run: bash tests/kind/smoke.sh

@@ -12,6 +12,8 @@
 //	IDP_SANDBOX_RUNTIME        OCI runtime of the runs, for example runsc (gVisor) or kata; default the daemon's
 //	IDP_SANDBOX_OWNER          label value that scopes the sweep (default "default")
 //	IDP_SANDBOX_MEMORY_MB IDP_SANDBOX_CPUS IDP_SANDBOX_PIDS IDP_SANDBOX_TIMEOUT_S IDP_SANDBOX_OUTPUT_KB
+//	IDP_SANDBOX_EGRESS_PROXY    name of the running idp-sandbox-egress container; enables network=egress for runs (default off)
+//	IDP_SANDBOX_EGRESS_PORT     its port (default 3128)
 //	IDP_SANDBOX_REQUIRE_CALLER  default true: a request must carry the caller the gateway forwards (register the
 //	                           server in idp-mcp with identity=forward); false only for a standalone development run
 //	IDP_SANDBOX_MAX_PER_CALLER  workspaces one caller may hold (default 8)
@@ -121,6 +123,10 @@ func main() {
 		}
 		eng.Runtime = os.Getenv("IDP_SANDBOX_RUNTIME")
 		eng.Owner = env("IDP_SANDBOX_OWNER", "default")
+		if proxy := os.Getenv("IDP_SANDBOX_EGRESS_PROXY"); proxy != "" {
+			eng.EgressProxy, eng.EgressPort = proxy, int(envInt("IDP_SANDBOX_EGRESS_PORT", 3128))
+			cfg.EgressEnabled = true
+		}
 		be = eng
 	case "kubernetes":
 		k, err := newKubeBackend(cfg)

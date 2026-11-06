@@ -1,0 +1,91 @@
+# The sandbox service. ONE replica, strategy Recreate: the workspace table lives in memory and the start-up
+# sweep deletes every Job, ConfigMap and claim labelled with this owner, so a second (or overlapping) replica
+# would destroy the first one's workspaces.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: idp-sandbox
+  namespace: idp-sandbox
+  labels:
+    app.kubernetes.io/component: sandbox
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: sandbox
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: sandbox
+    spec:
+      serviceAccountName: idp-sandbox
+      automountServiceAccountToken: true          # the credential for the Kubernetes API (Role idp-sandbox-runner)
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10570
+        runAsGroup: 10570
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: sandbox
+          image: idp-sandbox
+          ports:
+            - name: mcp
+              containerPort: 8570
+            - name: ops
+              containerPort: 9570
+          env:
+            - name: IDP_SANDBOX_BACKEND
+              value: kubernetes
+            - name: IDP_SANDBOX_LISTEN
+              value: "0.0.0.0:8570"
+            - name: IDP_SANDBOX_PRIVATE_NETWORK      # the NetworkPolicy lets only the idp-mcp gateway reach it
+              value: "true"
+            - name: IDP_SANDBOX_METRICS
+              value: "0.0.0.0:9570"
+            - name: IDP_SANDBOX_NAMESPACE            # where workspaces and runs live
+              value: idp-sandbox-runs
+            - name: IDP_SANDBOX_OWNER
+              value: idp-sandbox
+            # - name: IDP_SANDBOX_STORAGE_CLASS      # default: the cluster's default class
+            # - name: IDP_SANDBOX_RUNTIME_CLASS      # gvisor or kata: strongly recommended for untrusted code
+            - name: IDP_SANDBOX_PYTHON_IMAGE         # pin by digest; pulled by the nodes, never chosen by callers
+              value: python:3.12-slim
+            - name: IDP_SANDBOX_SHELL_IMAGE
+              value: alpine:3.22
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: ops
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: ops
+            periodSeconds: 20
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: "1", memory: 256Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: idp-sandbox
+  namespace: idp-sandbox
+  labels:
+    app.kubernetes.io/component: sandbox
+spec:
+  selector:
+    app.kubernetes.io/component: sandbox
+  ports:
+    - name: mcp
+      port: 8570
+      targetPort: mcp

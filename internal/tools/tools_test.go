@@ -180,3 +180,40 @@ func TestWorkspacesBelongToTheForwardedCaller(t *testing.T) {
 		t.Fatalf("%v", r)
 	}
 }
+
+func TestNetworkParameterFollowsTheOperatorsConfiguration(t *testing.T) {
+	f := &fake{files: map[string][]byte{}}
+	ts := server(t, f)
+	defer ts.Close()
+	id := call(t, ts, "sandbox_create", nil)["structuredContent"].(map[string]any)["workspaceId"].(string)
+	// egress is not configured: the schema offers only "none" and a request for egress is refused
+	m, _ := sandbox.New(context.Background(), sandbox.DefaultConfig("py", "sh"), f, slog.New(slog.DiscardHandler))
+	for _, tool := range New(m, slog.New(slog.DiscardHandler), nometrics{}) {
+		if tool.Name == "sandbox_run" {
+			enum := tool.InputSchema["properties"].(map[string]any)["network"].(map[string]any)["enum"].([]string)
+			if len(enum) != 1 || enum[0] != "none" {
+				t.Fatalf("%v", enum)
+			}
+		}
+	}
+	r := call(t, ts, "sandbox_run", map[string]any{"workspaceId": id, "language": "python", "code": "x", "network": "egress"})
+	if r["isError"] != true || !strings.Contains(fmt.Sprint(r["content"]), "not enabled") {
+		t.Fatalf("%v", r)
+	}
+	r = call(t, ts, "sandbox_run", map[string]any{"workspaceId": id, "language": "python", "code": "x", "network": "host"})
+	if r["isError"] != true {
+		t.Fatalf("an unknown network was accepted: %v", r)
+	}
+	// with egress configured the schema offers it
+	cfg := sandbox.DefaultConfig("py", "sh")
+	cfg.EgressEnabled = true
+	m2, _ := sandbox.New(context.Background(), cfg, f, slog.New(slog.DiscardHandler))
+	for _, tool := range New(m2, slog.New(slog.DiscardHandler), nometrics{}) {
+		if tool.Name == "sandbox_run" {
+			enum := tool.InputSchema["properties"].(map[string]any)["network"].(map[string]any)["enum"].([]string)
+			if len(enum) != 2 || enum[1] != "egress" {
+				t.Fatalf("%v", enum)
+			}
+		}
+	}
+}

@@ -1,0 +1,43 @@
+# What the backend calls, and nothing else (internal/kube): Jobs, ConfigMaps and PersistentVolumeClaims
+# are created, read, listed (sweep, delete by label) and deleted; pods are read, listed and deleted (the Job
+# controller creates them); logs are read. No update/patch/watch, no deletecollection, no exec/attach/
+# portforward, no secrets, nothing cluster-wide, nothing in the service's own namespace.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: idp-sandbox
+  namespace: idp-sandbox
+automountServiceAccountToken: false     # the pod opts in: it is the one pod that needs the token
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: idp-sandbox-runner
+  namespace: idp-sandbox-runs
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["configmaps", "persistentvolumeclaims"]
+    verbs: ["get", "list", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: idp-sandbox-runner
+  namespace: idp-sandbox-runs
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: idp-sandbox-runner
+subjects:
+  - kind: ServiceAccount
+    name: idp-sandbox
+    namespace: idp-sandbox

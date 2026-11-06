@@ -1,3 +1,4 @@
 /build/
 *.test
 .local/
+.local-kind.yaml

@@ -1,0 +1,27 @@
+# idp-sandbox on Kubernetes. NOT YET APPLIED TO A CLUSTER: the reference host has none. tests/deploy keeps
+# these manifests internally consistent (names, namespaces, hardening, RBAC, network policy, quota);
+# `kubectl apply --dry-run=server -k deploy/kubernetes` is the next check.
+#
+# No `namespace:` field here on purpose: the objects live in TWO namespaces (idp-sandbox for the service,
+# idp-sandbox-runs for what it runs), and the namespace transformer would move all of them into one.
+# Every manifest names its namespace.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - rbac.yaml
+  - sandbox.yaml
+  - runs-limits.yaml
+  - networkpolicy.yaml
+# labels, not commonLabels: commonLabels also rewrites every selector, including the NetworkPolicy
+# peers that select other namespaces' pods (kube-dns, the MCP gateway), which then match nothing
+# (found by idp-telos-go tools/k8s_check.py and its kind run)
+labels:
+  - pairs:
+      app.kubernetes.io/name: idp-sandbox
+      app.kubernetes.io/part-of: idp-telos
+    includeTemplates: true
+images:
+  - name: idp-sandbox
+    newName: registry.example.com/idp/idp-sandbox   # set to the image built by deploy/build.sh, pinned by digest
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000

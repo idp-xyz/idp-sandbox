@@ -7,6 +7,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -39,6 +41,10 @@ type Engine struct {
 	// WorkspaceBytes bounds the size of one file a helper command may write (the volume's own size
 	// limit is the real quota).
 	WorkspaceBytes int64
+	// EgressProxy is the name of the running egress proxy container (cmd/idp-sandbox-egress) and EgressPort its
+	// port. A run that asks for egress gets its own internal network with the proxy attached and nothing else.
+	EgressProxy string
+	EgressPort  int
 }
 
 // New connects to host: "unix:///var/run/docker.sock" or "tcp://127.0.0.1:2375".
@@ -270,12 +276,26 @@ func (e *Engine) ListFiles(ctx context.Context, workspace string, max int) ([]sa
 func (e *Engine) Run(ctx context.Context, spec sandbox.RunSpec) (sandbox.RunResult, error) {
 	lim := spec.Limits
 	var created struct{ Id string }
+	network, env := "none", []string{"HOME=/tmp", "LANG=C.UTF-8", "PYTHONDONTWRITEBYTECODE=1", "PYTHONUNBUFFERED=1"}
+	if spec.Egress {
+		if e.EgressProxy == "" {
+			return sandbox.RunResult{}, sandbox.ErrNoEgress
+		}
+		net, err := e.runNetwork(ctx)
+		if err != nil {
+			return sandbox.RunResult{}, err
+		}
+		defer net.remove(e)
+		network = net.name
+		proxy := fmt.Sprintf("http://%s:%d", e.EgressProxy, e.EgressPort)
+		env = append(env, "HTTP_PROXY="+proxy, "HTTPS_PROXY="+proxy, "http_proxy="+proxy, "https_proxy="+proxy)
+	}
 	cfg := map[string]any{
 		"Image": spec.Image, "Cmd": spec.Cmd, "User": "65534:65534", "WorkingDir": "/work",
-		"Env":             []string{"HOME=/tmp", "LANG=C.UTF-8", "PYTHONDONTWRITEBYTECODE=1", "PYTHONUNBUFFERED=1"},
-		"NetworkDisabled": true, "Labels": e.labels(), "AttachStdin": spec.Stdin != nil, "OpenStdin": spec.Stdin != nil, "StdinOnce": spec.Stdin != nil, "Tty": false,
+		"Env":             env,
+		"NetworkDisabled": network == "none", "Labels": e.labels(), "AttachStdin": spec.Stdin != nil, "OpenStdin": spec.Stdin != nil, "StdinOnce": spec.Stdin != nil, "Tty": false,
 		"HostConfig": map[string]any{
-			"NetworkMode": "none", "ReadonlyRootfs": true, "CapDrop": []string{"ALL"},
+			"NetworkMode": network, "ReadonlyRootfs": true, "CapDrop": []string{"ALL"},
 			"SecurityOpt": []string{"no-new-privileges"}, "Privileged": false, "Init": true, "IpcMode": "private",
 			"Memory": lim.MemoryBytes, "MemorySwap": lim.MemoryBytes, "NanoCpus": int64(lim.CPUs * 1e9), "PidsLimit": lim.Pids,
 			"Mounts": []any{workspaceMount(spec.Workspace)},
@@ -441,6 +461,13 @@ func (e *Engine) Sweep(ctx context.Context) error {
 	for _, c := range cs {
 		e.remove(c.Id)
 	}
+	var ns []struct{ Id string }
+	if err := e.json(ctx, http.MethodGet, "/networks", url.Values{"filters": {string(filter)}}, nil, &ns); err == nil {
+		for _, n := range ns {
+			_ = e.json(ctx, http.MethodPost, "/networks/"+n.Id+"/disconnect", nil, map[string]any{"Container": e.EgressProxy, "Force": true}, nil)
+			_ = e.json(ctx, http.MethodDelete, "/networks/"+n.Id, nil, nil, nil)
+		}
+	}
 	var vs struct{ Volumes []struct{ Name string } }
 	if err := e.json(ctx, http.MethodGet, "/volumes", url.Values{"filters": {string(filter)}}, nil, &vs); err != nil {
 		return err
@@ -496,4 +523,37 @@ func (b *bufConn) CloseWrite() error {
 		return cw.CloseWrite()
 	}
 	return nil
+}
+
+// runNet is a run's own internal network: no route out, only the egress proxy attached. Per run, so that
+// concurrent runs of different callers cannot reach each other (an internal network has no gateway, and a
+// shared one would let containers talk to one another).
+type runNet struct{ id, name string }
+
+func (e *Engine) runNetwork(ctx context.Context) (*runNet, error) {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return nil, err
+	}
+	name := "idp-sbx-net-" + hex.EncodeToString(b[:])
+	var out struct{ Id string }
+	if err := e.json(ctx, http.MethodPost, "/networks/create", nil, map[string]any{
+		"Name": name, "Driver": "bridge", "Internal": true, "Labels": e.labels(), "CheckDuplicate": true,
+		"Options": map[string]string{"com.docker.network.bridge.enable_icc": "true"},
+	}, &out); err != nil {
+		return nil, err
+	}
+	n := &runNet{id: out.Id, name: name}
+	if err := e.json(ctx, http.MethodPost, "/networks/"+n.id+"/connect", nil, map[string]any{"Container": e.EgressProxy}, nil); err != nil {
+		n.remove(e)
+		return nil, fmt.Errorf("egress proxy %s: %w", e.EgressProxy, err)
+	}
+	return n, nil
+}
+
+func (n *runNet) remove(e *Engine) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	_ = e.json(ctx, http.MethodPost, "/networks/"+n.id+"/disconnect", nil, map[string]any{"Container": e.EgressProxy, "Force": true}, nil)
+	_ = e.json(ctx, http.MethodDelete, "/networks/"+n.id, nil, nil, nil)
 }

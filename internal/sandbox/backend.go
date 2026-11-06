@@ -27,6 +27,8 @@ type RunSpec struct {
 	Limits    Limits
 	Timeout   time.Duration
 	Stdin     []byte // fed to the command, then closed; nil attaches nothing
+	// Egress gives the run a path to the operator's allow-listed proxy and nothing else (ADR-0001 D12).
+	Egress bool
 }
 
 // RunResult is what a run left behind.
@@ -67,6 +69,7 @@ var (
 	ErrCapacity     = errors.New("the sandbox is at capacity; try again later")
 	ErrOwnerQuota   = errors.New("you already hold the maximum number of workspaces; delete one first")
 	ErrNoCaller     = errors.New("the request carries no caller identity")
+	ErrNoEgress     = errors.New("network access is not enabled on this sandbox")
 	ErrInvalid      = errors.New("invalid argument")
 	ErrFileTooLarge = errors.New("file too large")
 	ErrNoFile       = errors.New("no such file")

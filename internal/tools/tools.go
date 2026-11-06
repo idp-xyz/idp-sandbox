@@ -43,7 +43,7 @@ func decode(args map[string]json.RawMessage, into any) error {
 func failure(err error) mcp.Result {
 	switch {
 	case errors.Is(err, sandbox.ErrNotFound), errors.Is(err, sandbox.ErrBusy), errors.Is(err, sandbox.ErrCapacity),
-		errors.Is(err, sandbox.ErrInvalid), errors.Is(err, sandbox.ErrOwnerQuota), errors.Is(err, sandbox.ErrNoCaller), errors.Is(err, sandbox.ErrFileTooLarge), errors.Is(err, sandbox.ErrNoFile):
+		errors.Is(err, sandbox.ErrInvalid), errors.Is(err, sandbox.ErrOwnerQuota), errors.Is(err, sandbox.ErrNoCaller), errors.Is(err, sandbox.ErrNoEgress), errors.Is(err, sandbox.ErrFileTooLarge), errors.Is(err, sandbox.ErrNoFile):
 		return mcp.Result{Text: err.Error(), IsError: true}
 	}
 	return mcp.Result{Text: "the sandbox failed to complete the request", IsError: true}
@@ -96,6 +96,10 @@ func New(m *sandbox.Manager, log *slog.Logger, met Metrics) []mcp.Tool {
 		langs = append(langs, k)
 	}
 	sortStrings(langs)
+	networks, networkDescription := []string{"none"}, "Always none here: code has no network."
+	if cfg.EgressEnabled {
+		networks, networkDescription = []string{"none", "egress"}, "none (default): no network. egress: only the hosts the operator approved, through a proxy (HTTP_PROXY and HTTPS_PROXY are set)."
+	}
 	pathProp := map[string]any{"type": "string", "minLength": 1, "maxLength": 255, "description": "A path relative to the workspace, for example data/input.csv."}
 	return []mcp.Tool{
 		{Name: "sandbox_create",
@@ -113,13 +117,14 @@ func New(m *sandbox.Manager, log *slog.Logger, met Metrics) []mcp.Tool {
 					Structured: map[string]any{"workspaceId": id, "expiresAt": exp.UTC().Format(time.RFC3339)}}, "ws=" + short(id)
 			})},
 		{Name: "sandbox_run",
-			Description: fmt.Sprintf("Run code in a workspace and return its exit code, stdout and stderr. Files written under the working directory persist in the workspace for later runs. No network, no installs, at most %s per run, %d KiB of output. Only one run at a time per workspace.",
+			Description: fmt.Sprintf("Run code in a workspace and return its exit code, stdout and stderr. Files written under the working directory persist in the workspace for later runs. No network unless network=egress is offered (see that parameter), no installs, at most %s per run, %d KiB of output. Only one run at a time per workspace.",
 				cfg.Limits.Timeout, cfg.Limits.OutputBytes>>10),
 			InputSchema: obj(map[string]any{
 				"workspaceId":    idProp(),
 				"language":       map[string]any{"type": "string", "enum": langs},
 				"code":           map[string]any{"type": "string", "minLength": 1, "maxLength": cfg.MaxCodeBytes},
 				"timeoutSeconds": map[string]any{"type": "integer", "minimum": 1, "maximum": int(cfg.Limits.Timeout.Seconds())},
+				"network":        map[string]any{"type": "string", "enum": networks, "description": networkDescription},
 			}, "workspaceId", "language", "code"),
 			Annotations: map[string]any{"readOnlyHint": false, "destructiveHint": false, "openWorldHint": false},
 			Call: a.wrap("sandbox_run", func(ctx context.Context, owner string, args map[string]json.RawMessage) (mcp.Result, string) {
@@ -128,13 +133,18 @@ func New(m *sandbox.Manager, log *slog.Logger, met Metrics) []mcp.Tool {
 					Language       string `json:"language"`
 					Code           string `json:"code"`
 					TimeoutSeconds int    `json:"timeoutSeconds"`
+					Network        string `json:"network"`
 				}
 				if err := decode(args, &in); err != nil {
 					return failure(err), ""
 				}
 				sum := sha256.Sum256([]byte(in.Code))
 				detail := fmt.Sprintf("ws=%s lang=%s code_sha256=%s", short(in.WorkspaceID), in.Language, hex.EncodeToString(sum[:6]))
-				res, err := m.Run(ctx, owner, in.WorkspaceID, in.Language, in.Code, time.Duration(in.TimeoutSeconds)*time.Second)
+				if in.Network != "" && in.Network != "none" && in.Network != "egress" {
+					return failure(fmt.Errorf("%w: network must be none or egress", sandbox.ErrInvalid)), detail
+				}
+				detail += " network=" + map[bool]string{false: "none", true: "egress"}[in.Network == "egress"]
+				res, err := m.Run(ctx, owner, in.WorkspaceID, in.Language, in.Code, time.Duration(in.TimeoutSeconds)*time.Second, in.Network == "egress")
 				if err != nil {
 					a.log.Warn("run", "err", err)
 					return failure(err), detail
