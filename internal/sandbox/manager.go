@@ -25,12 +25,16 @@ type Config struct {
 	Limits        Limits
 	Languages     map[string]Language
 	MaxWorkspaces int
-	MaxConcurrent int           // runs at the same time
-	IdleTTL       time.Duration // a workspace nobody used for this long is removed
-	MaxLifetime   time.Duration
-	MaxCodeBytes  int
-	MaxFileBytes  int64
-	Namespace     string // prefix of workspace names
+	MaxConcurrent int // runs at the same time
+	MaxPerOwner   int // workspaces one caller may hold
+	// RequireOwner refuses calls that carry no caller identity (the default); without it every anonymous
+	// call shares one owner and a workspace id is a bearer capability, as in ADR-0001 §5 before D11.
+	RequireOwner bool
+	IdleTTL      time.Duration // a workspace nobody used for this long is removed
+	MaxLifetime  time.Duration
+	MaxCodeBytes int
+	MaxFileBytes int64
+	Namespace    string // prefix of workspace names
 }
 
 // DefaultConfig is conservative: 256 MiB, one CPU, 64 processes, 20 s, 64 KiB of output, 64 MiB workspace.
@@ -46,12 +50,13 @@ func DefaultConfig(pythonImage, shellImage string) Config {
 				return []string{"sh", f}
 			}},
 		},
-		MaxWorkspaces: 64, MaxConcurrent: 8, IdleTTL: 30 * time.Minute, MaxLifetime: 4 * time.Hour,
+		MaxWorkspaces: 64, MaxPerOwner: 8, RequireOwner: true, MaxConcurrent: 8, IdleTTL: 30 * time.Minute, MaxLifetime: 4 * time.Hour,
 		MaxCodeBytes: 256 << 10, MaxFileBytes: 1 << 20, Namespace: "idp-sbx-",
 	}
 }
 
 type workspace struct {
+	owner         string
 	created, used time.Time
 	busy          bool
 }
@@ -86,12 +91,26 @@ func (m *Manager) Config() Config { return m.cfg }
 // Ready reports whether the isolation layer answers.
 func (m *Manager) Ready(ctx context.Context) error { return m.be.Ping(ctx) }
 
-// Create makes an empty workspace. The id is 128 random bits: knowing it is the capability to use it.
-func (m *Manager) Create(ctx context.Context) (id string, expires time.Time, err error) {
+// Create makes an empty workspace for owner. The id is 128 random bits, and every later call must come
+// from the same owner: a workspace of another caller is indistinguishable from one that does not exist.
+func (m *Manager) Create(ctx context.Context, owner string) (id string, expires time.Time, err error) {
+	if err := m.checkOwner(owner); err != nil {
+		return "", time.Time{}, err
+	}
 	m.mu.Lock()
 	if len(m.workspaces) >= m.cfg.MaxWorkspaces {
 		m.mu.Unlock()
 		return "", time.Time{}, ErrCapacity
+	}
+	held := 0
+	for _, w := range m.workspaces {
+		if w.owner == owner {
+			held++
+		}
+	}
+	if held >= m.cfg.MaxPerOwner {
+		m.mu.Unlock()
+		return "", time.Time{}, ErrOwnerQuota
 	}
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -100,7 +119,7 @@ func (m *Manager) Create(ctx context.Context) (id string, expires time.Time, err
 	}
 	id = hex.EncodeToString(b[:])
 	now := m.now()
-	m.workspaces[id] = &workspace{created: now, used: now}
+	m.workspaces[id] = &workspace{owner: owner, created: now, used: now}
 	m.mu.Unlock()
 	if err := m.be.CreateWorkspace(ctx, m.cfg.Namespace+id, m.cfg.Limits.WorkspaceBytes); err != nil {
 		m.forget(id)
@@ -116,11 +135,21 @@ func (m *Manager) forget(id string) {
 }
 
 // acquire marks the workspace used; a run additionally needs it exclusively.
-func (m *Manager) acquire(id string, exclusive bool) error {
+func (m *Manager) checkOwner(owner string) error {
+	if owner == "" && m.cfg.RequireOwner {
+		return ErrNoCaller
+	}
+	return nil
+}
+
+func (m *Manager) acquire(owner, id string, exclusive bool) error {
+	if err := m.checkOwner(owner); err != nil {
+		return err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	w := m.workspaces[id]
-	if w == nil || m.now().Sub(w.created) > m.cfg.MaxLifetime {
+	if w == nil || w.owner != owner || m.now().Sub(w.created) > m.cfg.MaxLifetime {
 		return ErrNotFound
 	}
 	if exclusive {
@@ -143,10 +172,13 @@ func (m *Manager) release(id string) {
 }
 
 // Delete removes a workspace and everything in it.
-func (m *Manager) Delete(ctx context.Context, id string) error {
+func (m *Manager) Delete(ctx context.Context, owner, id string) error {
+	if err := m.checkOwner(owner); err != nil {
+		return err
+	}
 	m.mu.Lock()
 	w := m.workspaces[id]
-	if w == nil {
+	if w == nil || w.owner != owner {
 		m.mu.Unlock()
 		return ErrNotFound
 	}
@@ -160,7 +192,7 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 }
 
 // Run executes code in the workspace. timeout 0 means the default; it is capped at the configured one.
-func (m *Manager) Run(ctx context.Context, id, language, code string, timeout time.Duration) (RunResult, error) {
+func (m *Manager) Run(ctx context.Context, owner, id, language, code string, timeout time.Duration) (RunResult, error) {
 	lang, ok := m.cfg.Languages[language]
 	if !ok {
 		return RunResult{}, fmt.Errorf("%w: language %q is not offered", ErrInvalid, language)
@@ -177,7 +209,7 @@ func (m *Manager) Run(ctx context.Context, id, language, code string, timeout ti
 	default:
 		return RunResult{}, ErrCapacity
 	}
-	if err := m.acquire(id, true); err != nil {
+	if err := m.acquire(owner, id, true); err != nil {
 		return RunResult{}, err
 	}
 	defer m.release(id)
@@ -192,7 +224,7 @@ func (m *Manager) Run(ctx context.Context, id, language, code string, timeout ti
 }
 
 // WriteFile stores text in the workspace.
-func (m *Manager) WriteFile(ctx context.Context, id, p string, data []byte) error {
+func (m *Manager) WriteFile(ctx context.Context, owner, id, p string, data []byte) error {
 	p, err := CleanPath(p)
 	if err != nil {
 		return err
@@ -200,27 +232,27 @@ func (m *Manager) WriteFile(ctx context.Context, id, p string, data []byte) erro
 	if int64(len(data)) > m.cfg.MaxFileBytes {
 		return ErrFileTooLarge
 	}
-	if err := m.acquire(id, false); err != nil {
+	if err := m.acquire(owner, id, false); err != nil {
 		return err
 	}
 	return m.be.WriteFile(ctx, m.cfg.Namespace+id, p, data)
 }
 
 // ReadFile returns a regular file of the workspace.
-func (m *Manager) ReadFile(ctx context.Context, id, p string) ([]byte, error) {
+func (m *Manager) ReadFile(ctx context.Context, owner, id, p string) ([]byte, error) {
 	p, err := CleanPath(p)
 	if err != nil {
 		return nil, err
 	}
-	if err := m.acquire(id, false); err != nil {
+	if err := m.acquire(owner, id, false); err != nil {
 		return nil, err
 	}
 	return m.be.ReadFile(ctx, m.cfg.Namespace+id, p, m.cfg.MaxFileBytes)
 }
 
 // ListFiles lists the regular files of the workspace (the runner's own scratch directory excluded).
-func (m *Manager) ListFiles(ctx context.Context, id string) ([]FileInfo, error) {
-	if err := m.acquire(id, false); err != nil {
+func (m *Manager) ListFiles(ctx context.Context, owner, id string) ([]FileInfo, error) {
+	if err := m.acquire(owner, id, false); err != nil {
 		return nil, err
 	}
 	all, err := m.be.ListFiles(ctx, m.cfg.Namespace+id, 1000)

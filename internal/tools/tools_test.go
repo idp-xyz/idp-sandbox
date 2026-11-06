@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -56,8 +57,16 @@ func server(t *testing.T, f *fake) *httptest.Server {
 
 func call(t *testing.T, ts *httptest.Server, tool string, args map[string]any) map[string]any {
 	t.Helper()
-	b, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{"name": tool, "arguments": args,
-		"_meta": map[string]any{"io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientCapabilities": map[string]any{}}}})
+	return callAs(t, ts, "alice", tool, args)
+}
+
+func callAs(t *testing.T, ts *httptest.Server, subject, tool string, args map[string]any) map[string]any {
+	t.Helper()
+	meta := map[string]any{"io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientCapabilities": map[string]any{}}
+	if subject != "" {
+		meta["io.idp.telos/caller"] = map[string]any{"subject": subject, "tenant": "acme", "roles": []string{"operator"}}
+	}
+	b, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{"name": tool, "arguments": args, "_meta": meta}})
 	req, _ := http.NewRequest(http.MethodPost, ts.URL, strings.NewReader(string(b)))
 	req.Header.Set("MCP-Protocol-Version", "2026-07-28")
 	resp, err := http.DefaultClient.Do(req)
@@ -150,5 +159,24 @@ func TestEveryToolHasASchemaTheGatewayCanPin(t *testing.T) {
 		if _, err := json.Marshal(tool.InputSchema); err != nil {
 			t.Errorf("%s: %v", tool.Name, err)
 		}
+	}
+}
+
+func TestWorkspacesBelongToTheForwardedCaller(t *testing.T) {
+	f := &fake{files: map[string][]byte{}}
+	ts := server(t, f)
+	defer ts.Close()
+	id := callAs(t, ts, "alice", "sandbox_create", nil)["structuredContent"].(map[string]any)["workspaceId"].(string)
+	callAs(t, ts, "alice", "sandbox_write_file", map[string]any{"workspaceId": id, "path": "a.txt", "content": "private"})
+	// another caller, holding the id, gets "not found" - the same answer as for an id that never existed
+	other := callAs(t, ts, "bob", "sandbox_read_file", map[string]any{"workspaceId": id, "path": "a.txt"})
+	missing := callAs(t, ts, "bob", "sandbox_read_file", map[string]any{"workspaceId": strings.Repeat("1", 32), "path": "a.txt"})
+	if other["isError"] != true || fmt.Sprint(other["content"]) != fmt.Sprint(missing["content"]) {
+		t.Fatalf("%v vs %v", other, missing)
+	}
+	// a request without identity is refused (the server was not registered with identity=forward)
+	r := callAs(t, ts, "", "sandbox_create", nil)
+	if r["isError"] != true || !strings.Contains(fmt.Sprint(r["content"]), "no caller identity") {
+		t.Fatalf("%v", r)
 	}
 }

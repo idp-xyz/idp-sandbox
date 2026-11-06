@@ -5,6 +5,7 @@ package mcp
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -59,6 +60,36 @@ type Result struct {
 	Text       string
 	Structured any
 	IsError    bool
+}
+
+// MetaCaller is where idp-mcp's gateway puts the verified caller for a server approved to receive it
+// (idp-mcp ADR-0001 D40). The gateway removes a client's own value of this key, so it can be trusted
+// as far as the gateway is.
+const MetaCaller = "io.idp.telos/caller"
+
+// Caller is the verified caller the gateway forwarded.
+type Caller struct {
+	Subject string   `json:"subject"`
+	Tenant  string   `json:"tenant"`
+	Roles   []string `json:"roles"`
+	Client  string   `json:"client,omitempty"`
+	Actor   string   `json:"actor,omitempty"`
+}
+
+// Owner is the stable identity workspaces are bound to: tenant and subject.
+func (c Caller) Owner() string {
+	if c.Subject == "" {
+		return ""
+	}
+	return c.Tenant + "/" + c.Subject
+}
+
+type callerKey struct{}
+
+// CallerFrom returns the caller of a tool request (zero value if none was forwarded).
+func CallerFrom(r *http.Request) Caller {
+	c, _ := r.Context().Value(callerKey{}).(Caller)
+	return c
 }
 
 // Server is the MCP endpoint.
@@ -224,7 +255,12 @@ func (s *Server) call(w http.ResponseWriter, r *http.Request, id json.RawMessage
 			return
 		}
 	}
-	res := t.Call(r, args)
+	var c Caller
+	var meta map[string]json.RawMessage
+	if json.Unmarshal(params["_meta"], &meta) == nil {
+		_ = json.Unmarshal(meta[MetaCaller], &c)
+	}
+	res := t.Call(r.WithContext(context.WithValue(r.Context(), callerKey{}, c)), args)
 	out := map[string]any{"resultType": "complete", "content": []map[string]any{{"type": "text", "text": res.Text}}}
 	if res.Structured != nil {
 		out["structuredContent"] = res.Structured

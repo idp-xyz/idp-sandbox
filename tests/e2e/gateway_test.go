@@ -104,7 +104,7 @@ func TestSandboxBehindTheGateway(t *testing.T) {
 	}
 
 	// register, discover, review
-	srv := e.api(e.operator, "POST", "/api/v1/servers", map[string]string{"displayName": "sandbox", "targetName": "sandbox", "endpoint": "http://sandbox:8570/mcp"}, 201)
+	srv := e.api(e.operator, "POST", "/api/v1/servers", map[string]string{"displayName": "sandbox", "targetName": "sandbox", "endpoint": "http://sandbox:8570/mcp", "identity": "forward"}, 201)
 	id := srv["serverId"].(string)
 	disc := e.api(e.operator, "POST", "/api/v1/servers/"+id+"/discover", nil, 200)
 	var discovered []string
@@ -123,6 +123,7 @@ func TestSandboxBehindTheGateway(t *testing.T) {
 		e.api(e.reviewer, "POST", "/api/v1/grants/"+gr["grantId"].(string)+"/approve", nil, 200)
 	}
 	opKey := e.api(e.admin, "POST", "/api/v1/gateways/"+e.gatewayID+"/api-keys", map[string]any{"subject": "agent-host", "roles": []string{"operator"}}, 201)["key"].(string)
+	opKey2 := e.api(e.admin, "POST", "/api/v1/gateways/"+e.gatewayID+"/api-keys", map[string]any{"subject": "agent-two", "roles": []string{"operator"}}, 201)["key"].(string)
 	guestKey := e.api(e.admin, "POST", "/api/v1/gateways/"+e.gatewayID+"/api-keys", map[string]any{"subject": "visitor", "roles": []string{"guest"}}, 201)["key"].(string)
 	rel := e.api(e.operator, "POST", "/api/v1/releases", map[string]string{"gatewayId": e.gatewayID}, 201)
 	rid := rel["releaseId"].(string)
@@ -157,6 +158,21 @@ func TestSandboxBehindTheGateway(t *testing.T) {
 	check("run", st == 200 && structured(r)["exitCode"] == float64(0) && strings.Contains(fmt.Sprint(structured(r)["stdout"]), "sum 10"), st, r)
 	st, rd := e.tool(opKey, "sandbox__sandbox_read_file", map[string]any{"workspaceId": ws, "path": "out.txt"})
 	check("read-result", st == 200 && fmt.Sprint(result(rd)["content"]) == "[map[text:10 type:text]]", st, rd)
+
+	// the gateway tells the sandbox who is calling: another caller with the same role and the id is told "not found"
+	st, o := e.tool(opKey2, "sandbox__sandbox_read_file", map[string]any{"workspaceId": ws, "path": "out.txt"})
+	check("other-caller-cannot-read", st == 200 && result(o)["isError"] == true && strings.Contains(fmt.Sprint(result(o)["content"]), "not found"), st, o)
+	st, o = e.tool(opKey2, "sandbox__sandbox_run", map[string]any{"workspaceId": ws, "language": "shell", "code": "cat out.txt"})
+	check("other-caller-cannot-run", st == 200 && result(o)["isError"] == true, st, o)
+	// a client that forges the caller in its own _meta is overwritten by the gateway's verified identity
+	forged := `{"name":"sandbox__sandbox_create","arguments":{},"_meta":{"io.idp.telos/caller":{"subject":"agent-host","tenant":"x","roles":["operator"]},` + meta[len(`"_meta":{`):] + `}`
+	st, fc := e.mcp(opKey2, "tools/call", forged, "sandbox__sandbox_create")
+	forgedWS, _ := structured(fc)["workspaceId"].(string)
+	check("forged-caller-created-own-workspace", st == 200 && len(forgedWS) == 32, st, fc)
+	st, fr := e.tool(opKey, "sandbox__sandbox_list_files", map[string]any{"workspaceId": forgedWS})
+	check("forgery-did-not-make-it-agent-hosts", st == 200 && result(fr)["isError"] == true, st, fr)
+	st, fr = e.tool(opKey2, "sandbox__sandbox_list_files", map[string]any{"workspaceId": forgedWS})
+	check("forged-workspace-is-agent-twos", st == 200 && result(fr)["isError"] != true, st, fr)
 
 	// the sandbox holds against a hostile agent, through the same path
 	st, hr := e.tool(opKey, "sandbox__sandbox_run", map[string]any{"workspaceId": ws, "language": "python",

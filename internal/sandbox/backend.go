@@ -65,6 +65,8 @@ var (
 	ErrNotFound     = errors.New("workspace not found or expired")
 	ErrBusy         = errors.New("the workspace is running another command")
 	ErrCapacity     = errors.New("the sandbox is at capacity; try again later")
+	ErrOwnerQuota   = errors.New("you already hold the maximum number of workspaces; delete one first")
+	ErrNoCaller     = errors.New("the request carries no caller identity")
 	ErrInvalid      = errors.New("invalid argument")
 	ErrFileTooLarge = errors.New("file too large")
 	ErrNoFile       = errors.New("no such file")

@@ -43,16 +43,20 @@ func decode(args map[string]json.RawMessage, into any) error {
 func failure(err error) mcp.Result {
 	switch {
 	case errors.Is(err, sandbox.ErrNotFound), errors.Is(err, sandbox.ErrBusy), errors.Is(err, sandbox.ErrCapacity),
-		errors.Is(err, sandbox.ErrInvalid), errors.Is(err, sandbox.ErrFileTooLarge), errors.Is(err, sandbox.ErrNoFile):
+		errors.Is(err, sandbox.ErrInvalid), errors.Is(err, sandbox.ErrOwnerQuota), errors.Is(err, sandbox.ErrNoCaller), errors.Is(err, sandbox.ErrFileTooLarge), errors.Is(err, sandbox.ErrNoFile):
 		return mcp.Result{Text: err.Error(), IsError: true}
 	}
 	return mcp.Result{Text: "the sandbox failed to complete the request", IsError: true}
 }
 
-func (a *api) wrap(name string, f func(ctx context.Context, args map[string]json.RawMessage) (mcp.Result, string)) func(*http.Request, map[string]json.RawMessage) mcp.Result {
+func (a *api) wrap(name string, f func(ctx context.Context, owner string, args map[string]json.RawMessage) (mcp.Result, string)) func(*http.Request, map[string]json.RawMessage) mcp.Result {
 	return func(r *http.Request, args map[string]json.RawMessage) mcp.Result {
 		start := time.Now()
-		res, detail := f(r.Context(), args)
+		caller := mcp.CallerFrom(r)
+		res, detail := f(r.Context(), caller.Owner(), args)
+		if caller.Subject != "" {
+			detail += " caller=" + short(caller.Subject)
+		}
 		outcome := "ok"
 		if res.IsError {
 			outcome = "error"
@@ -99,8 +103,8 @@ func New(m *sandbox.Manager, log *slog.Logger, met Metrics) []mcp.Tool {
 				cfg.Limits.MemoryBytes>>20, cfg.Limits.WorkspaceBytes>>20, cfg.IdleTTL),
 			InputSchema: obj(map[string]any{}),
 			Annotations: map[string]any{"readOnlyHint": false, "destructiveHint": false, "openWorldHint": false},
-			Call: a.wrap("sandbox_create", func(ctx context.Context, _ map[string]json.RawMessage) (mcp.Result, string) {
-				id, exp, err := m.Create(ctx)
+			Call: a.wrap("sandbox_create", func(ctx context.Context, owner string, _ map[string]json.RawMessage) (mcp.Result, string) {
+				id, exp, err := m.Create(ctx, owner)
 				if err != nil {
 					a.log.Warn("create", "err", err)
 					return failure(err), ""
@@ -118,7 +122,7 @@ func New(m *sandbox.Manager, log *slog.Logger, met Metrics) []mcp.Tool {
 				"timeoutSeconds": map[string]any{"type": "integer", "minimum": 1, "maximum": int(cfg.Limits.Timeout.Seconds())},
 			}, "workspaceId", "language", "code"),
 			Annotations: map[string]any{"readOnlyHint": false, "destructiveHint": false, "openWorldHint": false},
-			Call: a.wrap("sandbox_run", func(ctx context.Context, args map[string]json.RawMessage) (mcp.Result, string) {
+			Call: a.wrap("sandbox_run", func(ctx context.Context, owner string, args map[string]json.RawMessage) (mcp.Result, string) {
 				var in struct {
 					WorkspaceID    string `json:"workspaceId"`
 					Language       string `json:"language"`
@@ -130,7 +134,7 @@ func New(m *sandbox.Manager, log *slog.Logger, met Metrics) []mcp.Tool {
 				}
 				sum := sha256.Sum256([]byte(in.Code))
 				detail := fmt.Sprintf("ws=%s lang=%s code_sha256=%s", short(in.WorkspaceID), in.Language, hex.EncodeToString(sum[:6]))
-				res, err := m.Run(ctx, in.WorkspaceID, in.Language, in.Code, time.Duration(in.TimeoutSeconds)*time.Second)
+				res, err := m.Run(ctx, owner, in.WorkspaceID, in.Language, in.Code, time.Duration(in.TimeoutSeconds)*time.Second)
 				if err != nil {
 					a.log.Warn("run", "err", err)
 					return failure(err), detail
@@ -156,12 +160,12 @@ func New(m *sandbox.Manager, log *slog.Logger, met Metrics) []mcp.Tool {
 			InputSchema: obj(map[string]any{"workspaceId": idProp(), "path": pathProp,
 				"content": map[string]any{"type": "string", "maxLength": int(cfg.MaxFileBytes)}}, "workspaceId", "path", "content"),
 			Annotations: map[string]any{"readOnlyHint": false, "destructiveHint": true, "idempotentHint": true, "openWorldHint": false},
-			Call: a.wrap("sandbox_write_file", func(ctx context.Context, args map[string]json.RawMessage) (mcp.Result, string) {
+			Call: a.wrap("sandbox_write_file", func(ctx context.Context, owner string, args map[string]json.RawMessage) (mcp.Result, string) {
 				var in struct{ WorkspaceID, Path, Content string }
 				if err := decodeFile(args, &in.WorkspaceID, &in.Path, &in.Content); err != nil {
 					return failure(err), ""
 				}
-				if err := m.WriteFile(ctx, in.WorkspaceID, in.Path, []byte(in.Content)); err != nil {
+				if err := m.WriteFile(ctx, owner, in.WorkspaceID, in.Path, []byte(in.Content)); err != nil {
 					a.log.Warn("write", "err", err)
 					return failure(err), "ws=" + short(in.WorkspaceID)
 				}
@@ -171,12 +175,12 @@ func New(m *sandbox.Manager, log *slog.Logger, met Metrics) []mcp.Tool {
 			Description: "Read a text file from a workspace.",
 			InputSchema: obj(map[string]any{"workspaceId": idProp(), "path": pathProp}, "workspaceId", "path"),
 			Annotations: map[string]any{"readOnlyHint": true, "openWorldHint": false},
-			Call: a.wrap("sandbox_read_file", func(ctx context.Context, args map[string]json.RawMessage) (mcp.Result, string) {
+			Call: a.wrap("sandbox_read_file", func(ctx context.Context, owner string, args map[string]json.RawMessage) (mcp.Result, string) {
 				var ws, p string
 				if err := decodeFile(args, &ws, &p, nil); err != nil {
 					return failure(err), ""
 				}
-				b, err := m.ReadFile(ctx, ws, p)
+				b, err := m.ReadFile(ctx, owner, ws, p)
 				if err != nil {
 					if !errors.Is(err, sandbox.ErrNoFile) {
 						a.log.Warn("read", "err", err)
@@ -192,14 +196,14 @@ func New(m *sandbox.Manager, log *slog.Logger, met Metrics) []mcp.Tool {
 			Description: "List the files in a workspace with their sizes.",
 			InputSchema: obj(map[string]any{"workspaceId": idProp()}, "workspaceId"),
 			Annotations: map[string]any{"readOnlyHint": true, "openWorldHint": false},
-			Call: a.wrap("sandbox_list_files", func(ctx context.Context, args map[string]json.RawMessage) (mcp.Result, string) {
+			Call: a.wrap("sandbox_list_files", func(ctx context.Context, owner string, args map[string]json.RawMessage) (mcp.Result, string) {
 				var in struct {
 					WorkspaceID string `json:"workspaceId"`
 				}
 				if err := decode(args, &in); err != nil {
 					return failure(err), ""
 				}
-				files, err := m.ListFiles(ctx, in.WorkspaceID)
+				files, err := m.ListFiles(ctx, owner, in.WorkspaceID)
 				if err != nil {
 					a.log.Warn("list", "err", err)
 					return failure(err), "ws=" + short(in.WorkspaceID)
@@ -217,14 +221,14 @@ func New(m *sandbox.Manager, log *slog.Logger, met Metrics) []mcp.Tool {
 			Description: "Delete a workspace and all its files now.",
 			InputSchema: obj(map[string]any{"workspaceId": idProp()}, "workspaceId"),
 			Annotations: map[string]any{"readOnlyHint": false, "destructiveHint": true, "idempotentHint": true, "openWorldHint": false},
-			Call: a.wrap("sandbox_delete", func(ctx context.Context, args map[string]json.RawMessage) (mcp.Result, string) {
+			Call: a.wrap("sandbox_delete", func(ctx context.Context, owner string, args map[string]json.RawMessage) (mcp.Result, string) {
 				var in struct {
 					WorkspaceID string `json:"workspaceId"`
 				}
 				if err := decode(args, &in); err != nil {
 					return failure(err), ""
 				}
-				if err := m.Delete(ctx, in.WorkspaceID); err != nil {
+				if err := m.Delete(ctx, owner, in.WorkspaceID); err != nil {
 					a.log.Warn("delete", "err", err)
 					return failure(err), "ws=" + short(in.WorkspaceID)
 				}

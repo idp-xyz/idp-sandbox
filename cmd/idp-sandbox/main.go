@@ -12,6 +12,9 @@
 //	IDP_SANDBOX_RUNTIME        OCI runtime of the runs, for example runsc (gVisor) or kata; default the daemon's
 //	IDP_SANDBOX_OWNER          label value that scopes the sweep (default "default")
 //	IDP_SANDBOX_MEMORY_MB IDP_SANDBOX_CPUS IDP_SANDBOX_PIDS IDP_SANDBOX_TIMEOUT_S IDP_SANDBOX_OUTPUT_KB
+//	IDP_SANDBOX_REQUIRE_CALLER  default true: a request must carry the caller the gateway forwards (register the
+//	                           server in idp-mcp with identity=forward); false only for a standalone development run
+//	IDP_SANDBOX_MAX_PER_CALLER  workspaces one caller may hold (default 8)
 //	IDP_SANDBOX_WORKSPACE_MB IDP_SANDBOX_MAX_WORKSPACES IDP_SANDBOX_MAX_CONCURRENT IDP_SANDBOX_IDLE_MIN
 package main
 
@@ -104,6 +107,8 @@ func main() {
 	cfg.Limits.WorkspaceBytes = envInt("IDP_SANDBOX_WORKSPACE_MB", cfg.Limits.WorkspaceBytes>>20) << 20
 	cfg.MaxWorkspaces = int(envInt("IDP_SANDBOX_MAX_WORKSPACES", int64(cfg.MaxWorkspaces)))
 	cfg.MaxConcurrent = int(envInt("IDP_SANDBOX_MAX_CONCURRENT", int64(cfg.MaxConcurrent)))
+	cfg.MaxPerOwner = int(envInt("IDP_SANDBOX_MAX_PER_CALLER", int64(cfg.MaxPerOwner)))
+	cfg.RequireOwner = os.Getenv("IDP_SANDBOX_REQUIRE_CALLER") != "false"
 	cfg.IdleTTL = time.Duration(envInt("IDP_SANDBOX_IDLE_MIN", int64(cfg.IdleTTL.Minutes()))) * time.Minute
 
 	eng, err := engine.New(env("IDP_SANDBOX_DOCKER_HOST", "unix:///var/run/docker.sock"), env("IDP_SANDBOX_SHELL_IMAGE", "alpine:3.22"))

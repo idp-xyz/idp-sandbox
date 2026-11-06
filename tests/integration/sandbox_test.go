@@ -14,6 +14,8 @@ import (
 	"idp-sandbox/internal/sandbox"
 )
 
+const owner = "acme/alice"
+
 func env(k, def string) string {
 	if v := os.Getenv(k); v != "" {
 		return v
@@ -54,7 +56,7 @@ func setup(t *testing.T, tweak func(*sandbox.Config)) *sandbox.Manager {
 
 func ws(t *testing.T, m *sandbox.Manager) string {
 	t.Helper()
-	id, _, err := m.Create(context.Background())
+	id, _, err := m.Create(context.Background(), owner)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +65,7 @@ func ws(t *testing.T, m *sandbox.Manager) string {
 
 func run(t *testing.T, m *sandbox.Manager, id, lang, code string) sandbox.RunResult {
 	t.Helper()
-	res, err := m.Run(context.Background(), id, lang, code, 0)
+	res, err := m.Run(context.Background(), owner, id, lang, code, 0)
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -81,15 +83,15 @@ func TestRunsCodeAndKeepsFilesBetweenRuns(t *testing.T) {
 	if r.ExitCode != 3 || !strings.Contains(r.Stdout, "kept") || !strings.Contains(r.Stderr, "oops") {
 		t.Fatalf("%+v", r)
 	}
-	b, err := m.ReadFile(context.Background(), id, "note.txt")
+	b, err := m.ReadFile(context.Background(), owner, id, "note.txt")
 	if err != nil || string(b) != "kept" {
 		t.Fatalf("read: %q %v", b, err)
 	}
-	files, err := m.ListFiles(context.Background(), id)
+	files, err := m.ListFiles(context.Background(), owner, id)
 	if err != nil || len(files) != 1 || files[0].Path != "note.txt" {
 		t.Fatalf("list: %v %v", files, err)
 	}
-	if err := m.WriteFile(context.Background(), id, "sub/dir/in.txt", []byte("from the agent")); err != nil {
+	if err := m.WriteFile(context.Background(), owner, id, "sub/dir/in.txt", []byte("from the agent")); err != nil {
 		t.Fatal(err)
 	}
 	r = run(t, m, id, "python", "print(open('sub/dir/in.txt').read())")
@@ -184,7 +186,7 @@ func TestInfiniteLoopTimesOut(t *testing.T) {
 		t.Fatalf("%+v after %s", r, time.Since(start))
 	}
 	// a caller can only shorten the timeout
-	res, err := m.Run(context.Background(), id, "python", "import time; time.sleep(60)", time.Hour)
+	res, err := m.Run(context.Background(), owner, id, "python", "import time; time.sleep(60)", time.Hour)
 	if err != nil || !res.TimedOut {
 		t.Fatalf("%+v %v", res, err)
 	}
@@ -227,10 +229,10 @@ func TestWorkspacesAreIsolatedFromEachOther(t *testing.T) {
 	if strings.Contains(r.Stdout, "secret-of-a") {
 		t.Fatalf("workspace b saw workspace a:\n%s", r.Stdout)
 	}
-	if _, err := m.ReadFile(context.Background(), b, "a.txt"); err == nil {
+	if _, err := m.ReadFile(context.Background(), owner, b, "a.txt"); err == nil {
 		t.Fatal("read across workspaces")
 	}
-	if _, err := m.ReadFile(context.Background(), "00000000000000000000000000000000", "a.txt"); err == nil {
+	if _, err := m.ReadFile(context.Background(), owner, "00000000000000000000000000000000", "a.txt"); err == nil {
 		t.Fatal("a guessed id worked")
 	}
 }
@@ -240,7 +242,7 @@ func TestSymlinkInWorkspaceIsNotFollowed(t *testing.T) {
 	id := ws(t, m)
 	run(t, m, id, "shell", "ln -s /etc/passwd link; ln -s ../../../../etc/shadow link2; mkdir d; ln -s /work d/up")
 	for _, p := range []string{"link", "link2", "d/up"} {
-		if b, err := m.ReadFile(context.Background(), id, p); err == nil {
+		if b, err := m.ReadFile(context.Background(), owner, id, p); err == nil {
 			t.Errorf("read %s through a symlink: %q", p, b)
 		}
 	}
@@ -263,14 +265,14 @@ func TestOneRunAtATimeAndCapacity(t *testing.T) {
 	m := setup(t, func(c *sandbox.Config) { c.MaxWorkspaces = 2 })
 	id := ws(t, m)
 	done := make(chan struct{})
-	go func() { _, _ = m.Run(context.Background(), id, "shell", "sleep 3", 0); close(done) }()
+	go func() { _, _ = m.Run(context.Background(), owner, id, "shell", "sleep 3", 0); close(done) }()
 	time.Sleep(1500 * time.Millisecond)
-	if _, err := m.Run(context.Background(), id, "shell", "echo x", 0); err != sandbox.ErrBusy {
+	if _, err := m.Run(context.Background(), owner, id, "shell", "echo x", 0); err != sandbox.ErrBusy {
 		t.Errorf("a second run in a busy workspace: %v", err)
 	}
 	<-done
 	ws(t, m)
-	if _, _, err := m.Create(context.Background()); err != sandbox.ErrCapacity {
+	if _, _, err := m.Create(context.Background(), owner); err != sandbox.ErrCapacity {
 		t.Errorf("a third workspace: %v", err)
 	}
 }
@@ -279,10 +281,10 @@ func TestDeleteAndReap(t *testing.T) {
 	m := setup(t, func(c *sandbox.Config) { c.IdleTTL = time.Nanosecond })
 	id := ws(t, m)
 	run(t, m, id, "shell", "echo x > f")
-	if err := m.Delete(context.Background(), id); err != nil {
+	if err := m.Delete(context.Background(), owner, id); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.ReadFile(context.Background(), id, "f"); err != sandbox.ErrNotFound {
+	if _, err := m.ReadFile(context.Background(), owner, id, "f"); err != sandbox.ErrNotFound {
 		t.Errorf("after delete: %v", err)
 	}
 	ws(t, m)
@@ -295,16 +297,57 @@ func TestDeleteAndReap(t *testing.T) {
 func TestInvalidRequestsAreRefused(t *testing.T) {
 	m := setup(t, nil)
 	id := ws(t, m)
-	if _, err := m.Run(context.Background(), id, "ruby", "puts 1", 0); err == nil {
+	if _, err := m.Run(context.Background(), owner, id, "ruby", "puts 1", 0); err == nil {
 		t.Error("an unlisted language ran")
 	}
-	if _, err := m.Run(context.Background(), id, "python", "", 0); err == nil {
+	if _, err := m.Run(context.Background(), owner, id, "python", "", 0); err == nil {
 		t.Error("empty code ran")
 	}
-	if _, err := m.Run(context.Background(), id, "python", strings.Repeat("#", 300<<10), 0); err == nil {
+	if _, err := m.Run(context.Background(), owner, id, "python", strings.Repeat("#", 300<<10), 0); err == nil {
 		t.Error("oversized code ran")
 	}
-	if err := m.WriteFile(context.Background(), id, "big", make([]byte, 2<<20)); err != sandbox.ErrFileTooLarge {
+	if err := m.WriteFile(context.Background(), owner, id, "big", make([]byte, 2<<20)); err != sandbox.ErrFileTooLarge {
 		t.Errorf("oversized file: %v", err)
+	}
+}
+
+func TestAWorkspaceBelongsToItsCaller(t *testing.T) {
+	m := setup(t, func(c *sandbox.Config) { c.MaxPerOwner = 2 })
+	id := ws(t, m)
+	run(t, m, id, "shell", "echo mine > f")
+	bob := "acme/bob"
+	ctx := context.Background()
+	if _, err := m.Run(ctx, bob, id, "shell", "cat f", 0); err != sandbox.ErrNotFound {
+		t.Errorf("another caller ran in the workspace: %v", err)
+	}
+	if _, err := m.ReadFile(ctx, bob, id, "f"); err != sandbox.ErrNotFound {
+		t.Errorf("another caller read from it: %v", err)
+	}
+	if err := m.WriteFile(ctx, bob, id, "g", []byte("x")); err != sandbox.ErrNotFound {
+		t.Errorf("another caller wrote to it: %v", err)
+	}
+	if _, err := m.ListFiles(ctx, bob, id); err != sandbox.ErrNotFound {
+		t.Errorf("another caller listed it: %v", err)
+	}
+	if err := m.Delete(ctx, bob, id); err != sandbox.ErrNotFound {
+		t.Errorf("another caller deleted it: %v", err)
+	}
+	// the same subject in another tenant is another owner
+	if _, err := m.ReadFile(ctx, "globex/alice", id, "f"); err != sandbox.ErrNotFound {
+		t.Errorf("the same subject of another tenant read it: %v", err)
+	}
+	// no identity is refused, and quotas are per caller
+	if _, _, err := m.Create(ctx, ""); err != sandbox.ErrNoCaller {
+		t.Errorf("anonymous create: %v", err)
+	}
+	ws(t, m)
+	if _, _, err := m.Create(ctx, owner); err != sandbox.ErrOwnerQuota {
+		t.Errorf("a third workspace of one caller: %v", err)
+	}
+	if _, _, err := m.Create(ctx, bob); err != nil {
+		t.Errorf("bob is held back by alice's quota: %v", err)
+	}
+	if b, err := m.ReadFile(ctx, owner, id, "f"); err != nil || string(b) != "mine\n" {
+		t.Errorf("the owner lost access: %q %v", b, err)
 	}
 }
