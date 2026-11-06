@@ -22,6 +22,8 @@ IDP TELOS 的 Agent 执行沙箱：一个 MCP 服务器，让 Agent 在隔离的
 
 `sandbox_create`、`sandbox_run`（`python` 或 `shell`）、`sandbox_write_file`、`sandbox_read_file`、`sandbox_list_files`、`sandbox_delete`。经网关时名字带上目标名前缀（`sandbox__sandbox_run`）。
 
+运维手册：[`docs/RUNBOOK.md`](docs/RUNBOOK.md)（接入、后端、配置、故障排查、安全边界）。
+
 ## 使用
 
 ```bash
