@@ -1,0 +1,22 @@
+# The sandbox as one more upstream of idp-mcp's development topology (deploy/e2e.sh merges it with
+# ../idp-mcp/deploy/compose.yaml). DEV ONLY: it mounts the Docker socket, which is root on the host.
+services:
+  sandbox:
+    image: ${IDP_SANDBOX_IMAGE:-idp-sandbox:dev}
+    networks: [upstream]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      IDP_SANDBOX_LISTEN: 0.0.0.0:8570
+      IDP_SANDBOX_PRIVATE_NETWORK: 'true'
+      IDP_SANDBOX_METRICS: 0.0.0.0:9570
+      IDP_SANDBOX_OWNER: e2e
+      IDP_SANDBOX_PYTHON_IMAGE: ${IDP_SANDBOX_PYTHON_IMAGE:-public.ecr.aws/docker/library/python:3.12-slim}
+      IDP_SANDBOX_SHELL_IMAGE: ${IDP_SANDBOX_SHELL_IMAGE:-public.ecr.aws/docker/library/alpine:3.22}
+  registry:
+    environment:
+      IDP_ALLOWED_UPSTREAM_HOSTS: minimal,reference,sandbox
+      IDP_PRIVATE_UPSTREAM_HOSTS: minimal,reference,sandbox
