@@ -1,6 +1,7 @@
 """The Kubernetes backend on a real cluster (tests/kind/smoke.sh): MCP calls through a port-forward to the sandbox
 service, with the caller the gateway would forward, plus kubectl checks of what the cluster actually did."""
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -75,10 +76,10 @@ try:
 except OSError:
     print('root read-only')
 print('internet', tcp('1.1.1.1', 443))
-print('api', tcp('kubernetes.default.svc', 443))
-print('sandbox-service', tcp('idp-sandbox.idp-sandbox.svc', 8570))
+print('api', tcp('%s', 443))
+print('sandbox-service', tcp('%s', 8570))
 print('sa token', os.path.exists('/var/run/secrets/kubernetes.io/serviceaccount/token'))
-""")
+""" % (os.environ["API_IP"], os.environ["SANDBOX_IP"]))
 out = structured(r).get("stdout", "")
 check("unprivileged", "uid 65534" in out and "CapEff:\t0000000000000000" in out and "NoNewPrivs:\t1" in out and "root read-only" in out, out)
 check("no-network", "internet blocked" in out and "api blocked" in out and "sandbox-service blocked" in out and "CONNECTED" not in out, out)

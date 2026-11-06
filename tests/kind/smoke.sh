@@ -19,4 +19,5 @@ trap 'kubectl -n idp-sandbox logs deploy/idp-sandbox --tail 60 || true; kubectl 
 kubectl -n idp-sandbox rollout status deploy/idp-sandbox --timeout=180s
 kubectl -n idp-sandbox port-forward svc/idp-sandbox 8570:8570 >/dev/null 2>&1 & PF=$!
 for _ in $(seq 1 30); do curl -sf -o /dev/null --noproxy '*' -X POST http://127.0.0.1:8570/mcp && break; sleep 1; done
-python3 -I tests/kind/check.py
+# cluster IPs, not names: a blocked DNS lookup would hang the probe past the run's time limit
+API_IP="$(kubectl get svc kubernetes -o jsonpath='{.spec.clusterIP}')" SANDBOX_IP="$(kubectl -n idp-sandbox get svc idp-sandbox -o jsonpath='{.spec.clusterIP}')" python3 tests/kind/check.py
