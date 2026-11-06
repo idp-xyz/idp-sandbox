@@ -8,8 +8,22 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 CLUSTER="${KIND_CLUSTER:-kind}"
 bash deploy/build.sh idp-sandbox:ci
-# the runtime images are pulled by the cluster's nodes, as in production (kind load fails on multi-platform images)
-kind load docker-image idp-sandbox:ci --name "$CLUSTER" >/dev/null
+# load an image into the cluster; a Docker with the containerd image store saves all platforms and kind's import
+# then fails, so save the one platform the nodes run
+load_image() {
+  local tar; tar="$(mktemp --suffix=.tar)"
+  docker save --platform linux/amd64 "$1" -o "$tar" 2>/dev/null || docker save "$1" -o "$tar"
+  kind load image-archive "$tar" --name "$CLUSTER" >/dev/null; rm -f "$tar"
+}
+# the runtime images are pulled by the cluster's nodes, as in production (CI: kind load fails on multi-platform
+# images). LOAD_LOCAL_IMAGES=1 (a machine whose nodes cannot reach Docker Hub): load the ones the Docker daemon
+# already has, from the mirrors the other scripts use, under the names the manifests ask for.
+if [[ "${LOAD_LOCAL_IMAGES:-0}" == 1 ]]; then
+  for pair in public.ecr.aws/docker/library/python:3.12-slim=python:3.12-slim public.ecr.aws/docker/library/alpine:3.22=alpine:3.22; do
+    docker tag "${pair%%=*}" "${pair##*=}"; load_image "${pair##*=}"
+  done
+fi
+load_image idp-sandbox:ci
 API_IP="$(kubectl get endpoints kubernetes -o jsonpath='{.subsets[0].addresses[0].ip}')"
 kubectl kustomize deploy/kubernetes \
   | sed -e 's#registry.example.com/idp/idp-sandbox@sha256:0*#idp-sandbox:ci#' -e "s#203.0.113.20/32#$API_IP/32#" > .local-kind.yaml
