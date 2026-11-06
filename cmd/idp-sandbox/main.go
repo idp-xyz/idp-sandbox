@@ -111,23 +111,38 @@ func main() {
 	cfg.RequireOwner = os.Getenv("IDP_SANDBOX_REQUIRE_CALLER") != "false"
 	cfg.IdleTTL = time.Duration(envInt("IDP_SANDBOX_IDLE_MIN", int64(cfg.IdleTTL.Minutes()))) * time.Minute
 
-	eng, err := engine.New(env("IDP_SANDBOX_DOCKER_HOST", "unix:///var/run/docker.sock"), env("IDP_SANDBOX_SHELL_IMAGE", "alpine:3.22"))
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+	var be sandbox.Backend
+	switch backend := env("IDP_SANDBOX_BACKEND", "docker"); backend {
+	case "docker":
+		eng, err := engine.New(env("IDP_SANDBOX_DOCKER_HOST", "unix:///var/run/docker.sock"), env("IDP_SANDBOX_SHELL_IMAGE", "alpine:3.22"))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		eng.Runtime = os.Getenv("IDP_SANDBOX_RUNTIME")
+		eng.Owner = env("IDP_SANDBOX_OWNER", "default")
+		be = eng
+	case "kubernetes":
+		k, err := newKubeBackend(cfg)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		be = k
+	default:
+		fmt.Fprintf(os.Stderr, "unknown IDP_SANDBOX_BACKEND %q (docker or kubernetes)\n", backend)
 		os.Exit(2)
 	}
-	eng.Runtime = os.Getenv("IDP_SANDBOX_RUNTIME")
-	eng.Owner = env("IDP_SANDBOX_OWNER", "default")
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	pingCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	if err := eng.Ping(pingCtx); err != nil {
+	if err := be.Ping(pingCtx); err != nil {
 		cancel()
-		fmt.Fprintln(os.Stderr, "the container engine does not answer:", err)
+		fmt.Fprintln(os.Stderr, "the isolation backend does not answer:", err)
 		os.Exit(1)
 	}
 	cancel()
-	mgr, err := sandbox.New(ctx, cfg, eng, log)
+	mgr, err := sandbox.New(ctx, cfg, be, log)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -186,5 +201,5 @@ func main() {
 	_ = main.Shutdown(shutdown)
 	_ = opsSrv.Shutdown(shutdown)
 	// workspaces live in memory: remove them with the process
-	_ = eng.Sweep(shutdown)
+	_ = be.Sweep(shutdown)
 }
