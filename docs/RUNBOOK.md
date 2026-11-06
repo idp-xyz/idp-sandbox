@@ -49,7 +49,7 @@ bash deploy/e2e.sh              # 经真实的 idp-mcp 网关（需要并排的 
 bash tests/integration/gvisor.sh   # Docker 后端，全部运行在 gVisor 下（docker-in-docker，不需要 root）
 ```
 
-Kubernetes：`kubectl apply -k deploy/kubernetes`（先把镜像摘要、API 服务器的 `ipBlock` 换成真实值）。集群必须有**执行 NetworkPolicy 的 CNI**，否则"无网络"不成立（kind 默认的 kindnet 不行，用 Calico）。验证：`bash tests/kind/smoke.sh`；换运行时后 `EXPECT_GVISOR=1`（或 `EXPECT_KATA=1`）`python3 tests/kind/check.py`。
+Kubernetes：`kubectl apply -k deploy/kubernetes`（先把镜像摘要、API 服务器的 `ipBlock` 换成真实值）。集群必须有**执行 NetworkPolicy 的 CNI**，否则"无网络"不成立（kind 默认的 kindnet 不行，用 Calico）。验证：`bash tests/kind/smoke.sh`；换运行时后先 `kubectl -n idp-sandbox port-forward svc/idp-sandbox 8570:8570 &`，再 `EXPECT_GVISOR=1`（或 `EXPECT_KATA=1`）`python3 tests/kind/check.py`（它自己用 kubectl 查集群 IP）。检查中途崩了会留下工作区，30 分钟后回收，或 `kubectl -n idp-sandbox-runs delete pvc --all`。
 
 上线前核对：`readyz` 为 200；`/metrics` 有 `idp_sandbox_calls_total`；网关里该目标状态 OK；网络策略两端都放行 8570（网关 → 沙箱）。
 

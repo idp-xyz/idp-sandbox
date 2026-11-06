@@ -8,10 +8,22 @@ import threading
 import time
 import urllib.request
 
-URL = "http://127.0.0.1:8570/mcp"
+URL = os.environ.get("SANDBOX_URL", "http://127.0.0.1:8570/mcp")   # a port-forward to svc/idp-sandbox
 RUNS = "idp-sandbox-runs"
 META = {"io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientCapabilities": {}}
 failed = []
+
+
+def cluster_ip(*svc):
+    out = subprocess.run(["kubectl", *svc, "-o", "jsonpath={.spec.clusterIP}"], capture_output=True, text=True, timeout=30).stdout.strip()
+    if not out:
+        sys.exit("cannot find the service address: set API_IP and SANDBOX_IP, or run with kubectl pointing at the cluster")
+    return out
+
+
+# cluster IPs, not names: a blocked DNS lookup would hang the probe past the run's time limit
+API_IP = os.environ.get("API_IP") or cluster_ip("get", "svc", "kubernetes")
+SANDBOX_IP = os.environ.get("SANDBOX_IP") or cluster_ip("-n", "idp-sandbox", "get", "svc", "idp-sandbox")
 
 
 def check(name, ok, detail=""):
@@ -80,7 +92,7 @@ print('internet', tcp('1.1.1.1', 443))
 print('api', tcp('%s', 443))
 print('sandbox-service', tcp('%s', 8570))
 print('sa token', os.path.exists('/var/run/secrets/kubernetes.io/serviceaccount/token'))
-""" % (os.environ["API_IP"], os.environ["SANDBOX_IP"]))
+""" % (API_IP, SANDBOX_IP))
 out = structured(r).get("stdout", "")
 GVISOR = os.environ.get("EXPECT_GVISOR") == "1"
 # gVisor's /proc/self/status has no NoNewPrivs line (its kernel is its own); everything else must hold
@@ -95,7 +107,8 @@ check("no-service-account-token", "sa token False" in out, out)
 
 # limits
 r = run(ws, "x=[]\nwhile True: x.append(bytearray(32<<20))")
-check("memory-bomb-killed", structured(r).get("outOfMemory") is True or structured(r).get("exitCode") in (137, -9), r)
+# a run stopped at its time limit also reports exit 137: that is the timeout, not the memory limit
+check("memory-bomb-killed", not structured(r).get("timedOut") and (structured(r).get("outOfMemory") is True or structured(r).get("exitCode") in (137, -9)), r)
 r = run(ws, "while True: pass", timeoutSeconds=6)
 check("loop-times-out", structured(r).get("timedOut") is True, r)
 r = run(ws, "import sys\nwhile True: sys.stdout.write('A'*65536)", timeoutSeconds=6)

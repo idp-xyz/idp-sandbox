@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Kata Containers (a virtual machine per Pod) in a kind node and a RuntimeClass `kata`, so the sandbox's run Pods can use
 # it (IDP_SANDBOX_RUNTIME_CLASS=kata). No root on the host: the node is a privileged container; needs /dev/kvm.
-#   KATA_TARBALL=kata-go-static-4.3.1-amd64.tar.zst bash tests/kind/kata.sh      (1.3 GB; fetch it from the GitHub release)
+#   bash tests/kind/kata.sh                       downloads kata-go-static-$KATA_VERSION (1.3 GB, about 10 minutes through a proxy)
+#   KATA_TARBALL=path/to/kata-go-static-4.3.1-amd64.tar.zst bash tests/kind/kata.sh      use a tarball you already have
 #   EXPECT_KATA=1 python3 tests/kind/check.py                                    the cluster checks
 # Findings (WSL2 with nested KVM, kind v0.31, Kata 4.3.1): the Rust runtime (runtime-rs, kata-static) needs the system D-Bus
 # in the node, which the kind node image does not have; the Go runtime (kata-go-static) works. QEMU crashed in the guest
@@ -9,7 +10,11 @@
 # (the node's kubelet uses the systemd cgroup driver). Do not give the RuntimeClass a pod overhead here.
 set -euo pipefail
 NODE="${KIND_NODE:-kind-control-plane}" T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
-: "${KATA_TARBALL:?path of kata-go-static-*-amd64.tar.zst}"
+KATA_VERSION="${KATA_VERSION:-4.3.1}"
+if [[ -z "${KATA_TARBALL:-}" ]]; then
+  KATA_TARBALL="$T/kata-go-static.tar.zst"
+  curl -fL --retry 5 -C - -o "$KATA_TARBALL" "https://github.com/kata-containers/kata-containers/releases/download/$KATA_VERSION/kata-go-static-$KATA_VERSION-amd64.tar.zst"
+fi
 uv run -q --no-project --with zstandard python -W ignore -c "
 import sys, tarfile, zstandard
 with open(sys.argv[1], 'rb') as f, tarfile.open(fileobj=zstandard.ZstdDecompressor().stream_reader(f), mode='r|') as t: t.extractall(sys.argv[2])

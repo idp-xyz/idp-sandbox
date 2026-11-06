@@ -16,6 +16,11 @@ mkdir -p "$T/seed"
 ARGS="\"--platform=$PLATFORM\""; NESTED=""
 [[ "${CGROUPS:-1}" == 0 ]] && { ARGS="$ARGS,\"--ignore-cgroups\""; NESTED=1; }
 printf '{"runtimes":{"runsc":{"path":"/usr/local/bin/runsc","runtimeArgs":[%s]}},"storage-driver":"overlay2"}\n' "$ARGS" > "$T/seed/daemon.json"
+# docker:dind: from the daemon if it can pull, else with crane through the shell's proxy (a daemon that cannot reach Docker Hub)
+if ! docker image inspect docker:dind >/dev/null 2>&1; then
+  docker pull -q docker:dind >/dev/null 2>&1 || { command -v crane >/dev/null || { echo "need docker:dind (docker pull, or install crane)" >&2; exit 2; }
+    crane pull --format=tarball docker:dind "$T/dind.tar" && docker load -i "$T/dind.tar" >/dev/null; }
+fi
 docker rm -f sbx-dind >/dev/null 2>&1 || true
 docker create --name sbx-dind --privileged --cgroupns=host -e DOCKER_TLS_CERTDIR= -p "127.0.0.1:$PORT:2375" --entrypoint sh docker:dind \
   -c 'mkdir -p /etc/docker && cp /seed/daemon.json /etc/docker/daemon.json && exec dockerd-entrypoint.sh' >/dev/null
