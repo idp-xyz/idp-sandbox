@@ -20,6 +20,8 @@ jobs:
           go-version: '1.26'
       - name: Format, vet, unit tests
         run: make test
+      - name: Runtime images
+        run: make images
       - name: Isolation tests on real containers (network, fork bomb, memory, disk, symlinks, escapes)
         run: make test-integration
       - name: Image builds
