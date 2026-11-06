@@ -49,12 +49,12 @@ bash deploy/build.sh    # 镜像（scratch）
 
 环境变量：`IDP_SANDBOX_NAMESPACE`（默认 Pod 自己的命名空间，否则 `idp-sandbox`）、`IDP_SANDBOX_STORAGE_CLASS`、`IDP_SANDBOX_RUNTIME_CLASS`、`IDP_SANDBOX_OWNER`；测试或集群外用 `IDP_SANDBOX_KUBE_API`、`IDP_SANDBOX_KUBE_TOKEN` / `_TOKEN_FILE`、`IDP_SANDBOX_KUBE_CA_FILE`。
 
-与 Docker 后端的差别：进程数上限（`Pids`）在 Pod 上无法设置，由节点的 kubelet（`podPidsLimit`）或 gVisor 承担；每次文件操作是一个 Pod（秒级延迟）；超时被杀时 stderr 拿不到（容器整体被杀，标记没打印）；`/tmp` 没有 `noexec`；部署必须单副本（`Recreate`），因为启动清扫会删除同一 owner 的全部对象。网关的 NetworkPolicy 出站目前只放行 443 / 8443，要到沙箱需要给网关加 8570（idp-mcp 的清单，不在本仓库）。`kubectl apply --dry-run=server -k deploy/kubernetes` 与 kind 运行尚未做；`go test ./tests/deploy/` 只检查清单自身的一致性。
+与 Docker 后端的差别：进程数上限（`Pids`）在 Pod 上无法设置，由节点的 kubelet（`podPidsLimit`）或 gVisor 承担；每次文件操作是一个 Pod（秒级延迟）；超时被杀时 stderr 拿不到（容器整体被杀，标记没打印）；`/tmp` 没有 `noexec`；部署必须单副本（`Recreate`），因为启动清扫会删除同一 owner 的全部对象。网关与注册服务的 NetworkPolicy 出站已放行 8570（idp-mcp 的清单，命名空间带 `idp-mcp/mcp-upstream` 标签）。**已在真实集群上验证**：CI 的 `kubernetes` 任务在 kind（Calico）上应用 `deploy/kubernetes`，经端口转发跑 `tests/kind/check.py`：工具、运行 Pod 的加固字段、无网络（外网、API 服务器、沙箱服务都连不上）、内存炸弹、死循环、输出上限、`/tmp` 配额、调用者隔离、清理，全部通过。注意 kind 默认的 kindnet 在 CI 里**没有**拦住出站（run Pod 连上了外网），所以那个任务换成 Calico；你的集群必须有执行 NetworkPolicy 的 CNI，否则"无网络"不成立。`go test ./tests/deploy/` 另外检查清单自身的一致性。
 
 ## 必读的限制
 
 - **容器共享宿主内核**。默认的 runc 加固挡不住内核漏洞；对不可信代码的生产部署应使用 gVisor 或 Kata（本机没有 runsc，未实测）。
-- **服务需要容器引擎的套接字，那等于宿主的 root**。开发拓扑直接挂载 `/var/run/docker.sock`；生产应放在专用节点或虚拟机，或使用 rootless 引擎 / 套接字代理。Kubernetes 后端见下（`IDP_SANDBOX_BACKEND=kubernetes`，用 Job，不需要容器引擎套接字；只有对假 API 服务器的单元测试，未在真实集群上验证）。
+- **服务需要容器引擎的套接字，那等于宿主的 root**。开发拓扑直接挂载 `/var/run/docker.sock`；生产应放在专用节点或虚拟机，或使用 rootless 引擎 / 套接字代理。Kubernetes 后端见下（`IDP_SANDBOX_BACKEND=kubernetes`，用 Job，不需要容器引擎套接字；在 kind 上验证过，见下）。
 - **调用者身份来自网关，这一跳本身没有认证**：沙箱要求每个请求带网关转发的调用者（在 idp-mcp 里以 `identity: forward` 注册，idp-mcp ADR-0001 §12），工作区按它隔离。身份没有签名：沙箱靠"只有网关能到达它的私网"相信网关，所以网络策略就是边界。`IDP_SANDBOX_REQUIRE_CALLER=false` 只用于不经网关的开发运行（所有匿名调用共享一个所有者）。
 - 单实例：工作区表在内存里，重启即清空（工作区本来就在内存里）。
 
