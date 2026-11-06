@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# The Kubernetes backend on a real kind cluster (needs kind, kubectl, docker, go; CI: .github/workflows/ci.yml).
+# The Kubernetes backend on a real kind cluster with Calico (tests/kind/kind.yaml: kind create cluster --config
+# tests/kind/kind.yaml, then install Calico; CI does both). Needs kind, kubectl, docker, go.
 # Builds the image, applies deploy/kubernetes (the image and the API-server address filled in), then runs
 # tests/kind/check.py through a port-forward: tools, hardening of the run pods, no network (NetworkPolicy),
 # limits, caller isolation, clean-up.

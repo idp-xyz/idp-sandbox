@@ -120,7 +120,7 @@ check("other-caller-gets-not-found", r.get("isError") is True and "not found" in
 check("anonymous-refused", call("sandbox_create", {}, subject="").get("isError") is True)
 check("delete", call("sandbox_delete", {"workspaceId": ws}).get("isError") is not True)
 time.sleep(3)
-left = kubectl("-n", RUNS, "get", "jobs,pods,configmaps,pvc", "-o", "name").split()
+left = [x for x in kubectl("-n", RUNS, "get", "jobs,pods,configmaps,pvc", "-o", "name").split() if x != "configmap/kube-root-ca.crt"]
 check("nothing-left-behind", left == [], left)
 print(f"kubernetes backend: {len(failed)} failed in {time.time() - t0:.0f}s {failed}")
 sys.exit(1 if failed else 0)
