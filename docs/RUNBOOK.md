@@ -67,7 +67,7 @@ Kubernetes：`kubectl apply -k deploy/kubernetes`（先把镜像摘要、API 服
 |---|---|---|
 | 每个请求都是 `the request carries no caller identity` | 服务器没有以 `identity: forward` 注册，或绕过网关直连 | 重新注册（注册后不可改，要新建）；开发直连时设 `IDP_SANDBOX_REQUIRE_CALLER=false` |
 | 工具列表变了 / 网关说目录漂移 | 改了 schema（出口、限额）| 对服务器重新 discover、评审、发布 Release |
-| `a workspace not found or expired` | id 不对、属于别的调用者、已过期或沙箱重启过 | 重新 `sandbox_create`（别的调用者的 id 与不存在的 id 回答一样，这是有意的）|
+| `workspace not found or expired` | id 不对、属于别的调用者、已过期或沙箱重启过 | 重新 `sandbox_create`（别的调用者的 id 与不存在的 id 回答一样，这是有意的）|
 | `the sandbox is at capacity` | 并发或总数上限 | 稍后重试；调大 `_MAX_CONCURRENT` / `_MAX_WORKSPACES` |
 | `you already hold the maximum number of workspaces` | 每个调用者的上限 | `sandbox_delete` 一个 |
 | `network access is not enabled` | 没配出口代理 | 配代理并重新发布 Release（schema 会变）|
