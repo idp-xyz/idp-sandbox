@@ -70,7 +70,8 @@ def tcp(h, p):
         return 'blocked'
 print('uid', os.getuid())
 print('caps', [l for l in open('/proc/self/status') if l.startswith('CapEff')][0].strip())
-print('noprivs', [l for l in open('/proc/self/status') if l.startswith('NoNewPrivs')][0].strip())
+print('noprivs', ([l for l in open('/proc/self/status') if l.startswith('NoNewPrivs')] or ['NoNewPrivs:\tabsent'])[0].strip())
+print('kernel', open('/proc/version').read()[:24].strip())
 try:
     open('/etc/pwned', 'w'); print('root writable')
 except OSError:
@@ -81,7 +82,10 @@ print('sandbox-service', tcp('%s', 8570))
 print('sa token', os.path.exists('/var/run/secrets/kubernetes.io/serviceaccount/token'))
 """ % (os.environ["API_IP"], os.environ["SANDBOX_IP"]))
 out = structured(r).get("stdout", "")
-check("unprivileged", "uid 65534" in out and "CapEff:\t0000000000000000" in out and "NoNewPrivs:\t1" in out and "root read-only" in out, out)
+GVISOR = os.environ.get("EXPECT_GVISOR") == "1"
+# gVisor's /proc/self/status has no NoNewPrivs line (its kernel is its own); everything else must hold
+check("unprivileged", "uid 65534" in out and "CapEff:\t0000000000000000" in out and ("NoNewPrivs:\tabsent" if GVISOR else "NoNewPrivs:\t1") in out and "root read-only" in out, out)
+check("kernel-as-expected", ("kernel Linux version 4.4.0" in out) if GVISOR else ("kernel Linux version 4.4.0" not in out), out)
 check("no-network", "internet blocked" in out and "api blocked" in out and "sandbox-service blocked" in out and "CONNECTED" not in out, out)
 check("no-service-account-token", "sa token False" in out, out)
 

@@ -58,7 +58,7 @@
 - **服务需要容器引擎套接字，那等于宿主的 root**。开发拓扑挂载 `/var/run/docker.sock`；生产应在专用节点、虚拟机或 rootless 引擎上运行，或加套接字代理限制 API；或用 Kubernetes 后端（D12），那里服务账号的权限就是一个 Role。
 - **身份这一跳没有认证**：网关转发的身份没有签名，沙箱靠"只有网关能到达它的私网"相信网关（idp-mcp D43）。网络策略因此是边界；给身份签名需要网关与上游之间的密钥分发，是另一个决策。
 - **出口只有 Docker 后端有**（D13）：Kubernetes 后端的运行仍然完全没有网络；等价的做法（白名单代理 Pod 加只放行它的 NetworkPolicy）未做。出口代理按主机名放行，不按调用者区分：白名单对所有调用者一样。代理能看到并记录目标主机，看不到 HTTPS 的内容；放行的主机若允许上传，就能被用来外传工作区里的数据，所以白名单应当只列只读来源。
-- **Kubernetes 后端在 kind 上验证过，但这些没有**：PVC 的容量是否被存储驱动执行（kind 的 local-path 不执行；云块存储的卷大小本身就是上限）、gVisor / Kata（`runtimeClassName` 只有字段）、镜像摘要锁定与私有仓库拉取、生产 CNI 的行为。实测发现：kind 默认的 kindnet 在 CI 里没有拦住运行 Pod 的出站（连上了外网），所以验证用 Calico；**部署的集群必须有执行 NetworkPolicy 的 CNI**，否则"无网络"不成立。`Pids` 无法按 Pod 设置（交给 kubelet 的 `podPidsLimit` 或 gVisor）；stderr 在超时被杀时丢失；每次文件操作启动一个 Pod（秒级）。
+- **Kubernetes 后端在 kind 上验证过，但这些没有**：PVC 的容量是否被存储驱动执行（kind 的 local-path 不执行；云块存储的卷大小本身就是上限）、Kata、Docker 后端下的 gVisor（`IDP_SANDBOX_RUNTIME` 只有字段）。**Kubernetes 后端下的 gVisor 已在 kind 上验证**（2026-11-06，release 20260126.0，`kvm` 平台：默认的 `systrap` 平台在这台 WSL2 上起不来，最新的 20261102.0 报 "creating process: out of memory"，20260126.0 报 "failed to create a syscall thread"，`kvm` 与 `ptrace` 可用；节点的 inotify 实例上限要调高）。gVisor 下 22 项检查全过，只有 `/proc/self/status` 没有 `NoNewPrivs` 行；没做性能对比、镜像摘要锁定与私有仓库拉取、生产 CNI 的行为。实测发现：kind 默认的 kindnet 在 CI 里没有拦住运行 Pod 的出站（连上了外网），所以验证用 Calico；**部署的集群必须有执行 NetworkPolicy 的 CNI**，否则"无网络"不成立。`Pids` 无法按 Pod 设置（交给 kubelet 的 `podPidsLimit` 或 gVisor）；stderr 在超时被杀时丢失；每次文件操作启动一个 Pod（秒级）。
 - **单实例、内存里的工作区**：重启即清空；没有跨副本的会话。
 - **没有按调用者的配额与计费**：只有全局的并发与工作区总数上限。
 - 只有 Python 与 Shell 两种语言；镜像里没有额外的库（要数据分析库就得由运维构建带库的镜像并配置）。
