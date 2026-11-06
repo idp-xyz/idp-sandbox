@@ -75,6 +75,7 @@ Kubernetes：`kubectl apply -k deploy/kubernetes`（先把镜像摘要、API 服
 | 运行是 `killed: out of memory` | 内存上限 | 调大 `_MEMORY_MB`；Kata 下写满 `/tmp` 也表现为 OOM |
 | `docker: HTTP 404: No such image` | 运行镜像不在 Docker 守护进程 / 节点上 | 运维拉取或加载（服务绝不拉镜像）|
 | Pod 一直 `ContainerCreating`（Kubernetes）| 运行时问题 | gVisor：用 `kvm` 或 `ptrace` 平台，节点 inotify 上限调到 8192；Kata：Go 运行时 + Cloud Hypervisor，别给 RuntimeClass 加 overhead |
+| gVisor 下内存炸弹只被超时停下，运行的内存 / CPU 上限不生效（Kubernetes）| 节点用 systemd cgroup 驱动而 runsc 没开 `systemd-cgroup`：沙箱跑在 Pod 的 cgroup 之外；节点有 swap 时还有一层：kubelet 只给容器关 swap，而整个沙箱在 pause 容器的 cgroup 里 | `runsc.toml` 的 `[runsc_config]` 加 `systemd-cgroup = "true"`；节点有 swap 就给 Pod 关掉（`kubelet-kubepods.slice` 的 `MemorySwapMax=0`）；kind 上 `tests/kind/gvisor.sh` 都做了 |
 | 网关到沙箱超时 | 网络策略没放行 8570 | 网关与注册服务的出口策略加 8570；沙箱命名空间要带 `idp-mcp/mcp-upstream: "true"` 标签 |
 | 运行 Pod 能联网（Kubernetes）| CNI 不执行 NetworkPolicy | 换 Calico / Cilium；用 `tests/kind/check.py` 的 `no-network` 项验证 |
 | gVisor 下 `--pids-limit 16` 起不来 | gVisor 把自己的宿主线程算进上限 | 用 64（默认）|

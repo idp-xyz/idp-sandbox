@@ -2,3 +2,4 @@
 *.test
 .local/
 .local-kind.yaml
+__pycache__/
