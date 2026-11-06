@@ -13,9 +13,11 @@ T="$(mktemp -d)"; trap 'rm -rf "$T"; docker rm -f sbx-dind >/dev/null 2>&1 || tr
 RUNSC="${RUNSC:-$T/runsc}"
 [[ -x "$RUNSC" ]] || { curl -sfL -o "$T/runsc" "https://storage.googleapis.com/gvisor/releases/release/$VERSION/x86_64/runsc" && chmod +x "$T/runsc"; }
 mkdir -p "$T/seed"
-printf '{"runtimes":{"runsc":{"path":"/usr/local/bin/runsc","runtimeArgs":["--platform=%s","--ignore-cgroups"]}},"storage-driver":"overlay2"}\n' "$PLATFORM" > "$T/seed/daemon.json"
+ARGS="\"--platform=$PLATFORM\""; NESTED=""
+[[ "${CGROUPS:-1}" == 0 ]] && { ARGS="$ARGS,\"--ignore-cgroups\""; NESTED=1; }
+printf '{"runtimes":{"runsc":{"path":"/usr/local/bin/runsc","runtimeArgs":[%s]}},"storage-driver":"overlay2"}\n' "$ARGS" > "$T/seed/daemon.json"
 docker rm -f sbx-dind >/dev/null 2>&1 || true
-docker create --name sbx-dind --privileged -e DOCKER_TLS_CERTDIR= -p "127.0.0.1:$PORT:2375" --entrypoint sh docker:dind \
+docker create --name sbx-dind --privileged --cgroupns=host -e DOCKER_TLS_CERTDIR= -p "127.0.0.1:$PORT:2375" --entrypoint sh docker:dind \
   -c 'mkdir -p /etc/docker && cp /seed/daemon.json /etc/docker/daemon.json && exec dockerd-entrypoint.sh' >/dev/null
 docker cp "$RUNSC" sbx-dind:/usr/local/bin/runsc; docker cp "$T/seed" sbx-dind:/seed; docker start sbx-dind >/dev/null
 export DOCKER_HOST="tcp://127.0.0.1:$PORT" IDP_SANDBOX_DOCKER_HOST="tcp://127.0.0.1:$PORT"
@@ -24,4 +26,4 @@ for _ in $(seq 1 60); do docker info >/dev/null 2>&1 && break; sleep 1; done
 for img in public.ecr.aws/docker/library/python:3.12-slim public.ecr.aws/docker/library/alpine:3.22; do
   DOCKER_HOST= docker save --platform linux/amd64 "$img" | docker load >/dev/null
 done
-IDP_SANDBOX_RUNTIME=runsc IDP_SANDBOX_NESTED=1 go test -count=1 -timeout 1400s -v ./tests/integration
+IDP_SANDBOX_RUNTIME=runsc IDP_SANDBOX_NESTED="$NESTED" go test -count=1 -timeout 1400s -v ./tests/integration

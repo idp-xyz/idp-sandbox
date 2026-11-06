@@ -178,7 +178,13 @@ print("NOT STOPPED", n)
 		if !r.TimedOut {
 			t.Fatalf("not contained: %+v", r)
 		}
-		t.Log("nested gVisor: the process limit cannot hold; the timeout contained the bomb")
+		t.Log("nested gVisor without cgroups: the process limit cannot hold; the timeout contained the bomb")
+	} else if gvisor {
+		// gVisor counts the sandbox's own host threads against the process limit, not the guest's processes: a
+		// guest fork bomb exhausts it and the whole sandbox is killed (and reported as out of memory) within a second
+		if r.ExitCode != 137 || r.TimedOut || r.Duration > 5*time.Second {
+			t.Fatalf("the sandbox was not killed by the process limit: %+v", r)
+		}
 	} else if strings.Contains(r.Stdout, "NOT STOPPED") || !strings.Contains(r.Stdout, "stopped at") {
 		t.Fatalf("%+v", r)
 	}

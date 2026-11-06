@@ -53,7 +53,7 @@ bash deploy/build.sh    # 镜像（scratch）
 
 ## 必读的限制
 
-- **容器共享宿主内核**。默认的 runc 加固挡不住内核漏洞；对不可信代码的生产部署应使用 gVisor 或 Kata。**gVisor 已在 Kubernetes 后端上实测**（kind 节点里装 runsc，RuntimeClass `gvisor`，`tests/kind/gvisor.sh`；22 项集群检查全过，代码看到的内核是 gVisor 的 4.4.0；`/proc/self/status` 没有 `NoNewPrivs` 行是它与真 Linux 的差别）。**Docker 后端在 gVisor 下也实测了**：`bash tests/integration/gvisor.sh` 起一个 docker-in-docker 守护进程（注册 runsc，不需要宿主机 root），20 个隔离测试（含出口代理、文件操作）每次运行都在 gVisor 下，全过。嵌套环境里 runsc 不能应用 cgroup 限制，所以内存和进程数上限在那里不生效，炸弹靠 20 秒的墙钟超时挡住；真实节点上有 cgroup，那两项的上限是否生效没有在 Docker 后端上测到（Kubernetes 后端在 kind 的 gVisor 下内存炸弹被正确杀掉）。Kata 未试。
+- **容器共享宿主内核**。默认的 runc 加固挡不住内核漏洞；对不可信代码的生产部署应使用 gVisor 或 Kata。**gVisor 已在 Kubernetes 后端上实测**（kind 节点里装 runsc，RuntimeClass `gvisor`，`tests/kind/gvisor.sh`；22 项集群检查全过，代码看到的内核是 gVisor 的 4.4.0；`/proc/self/status` 没有 `NoNewPrivs` 行是它与真 Linux 的差别）。**Docker 后端在 gVisor 下也实测了**：`bash tests/integration/gvisor.sh` 起一个 docker-in-docker 守护进程（注册 runsc，容器用宿主的 cgroup 命名空间，所以 runsc 能应用内存和进程数限制，不需要宿主机 root），20 个隔离测试（含出口代理、文件操作）每次运行都在 gVisor 下，全过：内存炸弹被限额杀掉；fork 炸弹一秒内耗尽进程数上限，整个沙箱被杀（gVisor 把自己的线程算进上限，不是客户机的进程，所以 `--pids-limit` 要留够，16 起不来，我们默认的 64 可以）。**性能**（同一台机器，runc 对 runsc）：CPU 密集相同；4000 个小文件读写约 2 倍慢；`stat` 系统调用约 9 倍慢；300 MB 内存触碰约 4 倍慢；容器启动约 340 ms 对 640 ms。Kata 未试。
 - **服务需要容器引擎的套接字，那等于宿主的 root**。开发拓扑直接挂载 `/var/run/docker.sock`；生产应放在专用节点或虚拟机，或使用 rootless 引擎 / 套接字代理。Kubernetes 后端见下（`IDP_SANDBOX_BACKEND=kubernetes`，用 Job，不需要容器引擎套接字；在 kind 上验证过，见下）。
 - **调用者身份来自网关，这一跳本身没有认证**：沙箱要求每个请求带网关转发的调用者（在 idp-mcp 里以 `identity: forward` 注册，idp-mcp ADR-0001 §12），工作区按它隔离。身份没有签名：沙箱靠"只有网关能到达它的私网"相信网关，所以网络策略就是边界。`IDP_SANDBOX_REQUIRE_CALLER=false` 只用于不经网关的开发运行（所有匿名调用共享一个所有者）。
 - 单实例：工作区表在内存里，重启即清空（工作区本来就在内存里）。
