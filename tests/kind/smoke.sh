@@ -7,7 +7,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 CLUSTER="${KIND_CLUSTER:-kind}"
 bash deploy/build.sh idp-sandbox:ci
-for img in python:3.12-slim alpine:3.22; do docker pull -q "$img" >/dev/null; kind load docker-image "$img" --name "$CLUSTER" >/dev/null; done
+# the runtime images are pulled by the cluster's nodes, as in production (kind load fails on multi-platform images)
 kind load docker-image idp-sandbox:ci --name "$CLUSTER" >/dev/null
 API_IP="$(kubectl get endpoints kubernetes -o jsonpath='{.subsets[0].addresses[0].ip}')"
 kubectl kustomize deploy/kubernetes \
