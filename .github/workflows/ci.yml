@@ -18,6 +18,8 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26'
+      - name: Known vulnerabilities in the dependencies and the standard library (govulncheck)
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest && "$(go env GOPATH)/bin/govulncheck" ./...
       - name: Format, vet, unit tests
         run: make test
       - name: Runtime images
