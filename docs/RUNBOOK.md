@@ -33,6 +33,7 @@
 | `IDP_SANDBOX_MEMORY_MB` `_CPUS` `_PIDS` `_TIMEOUT_S` `_OUTPUT_KB` `_WORKSPACE_MB` | 每次运行的限额 | 256 / 1 / 64 / 20 / 64 / 64 |
 | `IDP_SANDBOX_IDLE_MIN` | 工作区空闲多久回收 | 30（存活上限 4 小时）|
 | `IDP_SANDBOX_PYTHON_IMAGE` / `_SHELL_IMAGE` | 运行镜像（运维选，调用者不能选；由运维拉取，服务不拉）| `python:3.12-slim` / `alpine:3.22` |
+| `IDP_SANDBOX_OFFICE_IMAGE` | office 运行档位的镜像（ADR-0001 D14）：`bash deploy/office/build.sh` 构建（OfficeCLI 版本与 SHA-256 钉在脚本里，离网构建并冒烟）；设了才有 `language: office` | 无（不提供 office）|
 | `IDP_SANDBOX_RUNTIME` | Docker：OCI 运行时（`runsc`、`kata`）| 守护进程默认 |
 | `IDP_SANDBOX_RUNTIME_CLASS` | Kubernetes：RuntimeClass | 无 |
 | `IDP_SANDBOX_EGRESS_PROXY` / `_EGRESS_PORT` | 出口代理容器名与端口；设了才有 `network: egress` | 关 |

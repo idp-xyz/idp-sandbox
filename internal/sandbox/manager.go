@@ -18,6 +18,15 @@ type Language struct {
 	// Command returns the command line that runs the file at /work/<file>.
 	Command func(file string) []string
 	File    string
+	// Description is what the tool tells the model about this language.
+	Description string
+}
+
+// OfficeLanguage is the office run profile (ADR-0001 D14): a POSIX shell script in the operator's office image, which has
+// officecli on its PATH for .docx, .xlsx and .pptx files in the workspace. Same isolation and limits as any other run.
+func OfficeLanguage(image string) Language {
+	return Language{Image: image, File: "main.sh", Command: func(f string) []string { return []string{"sh", f} },
+		Description: "a POSIX shell script with the officecli command on PATH, for reading, editing and creating .docx, .xlsx and .pptx files in the workspace (officecli help lists the commands)"}
 }
 
 // Config of the manager.
@@ -48,10 +57,10 @@ func DefaultConfig(pythonImage, shellImage string) Config {
 		Languages: map[string]Language{
 			"python": {Image: pythonImage, File: "main.py", Command: func(f string) []string {
 				return []string{"python", "-I", "-B", f}
-			}},
+			}, Description: "a Python 3 program (standard library only)"},
 			"shell": {Image: shellImage, File: "main.sh", Command: func(f string) []string {
 				return []string{"sh", f}
-			}},
+			}, Description: "a POSIX shell script"},
 		},
 		MaxWorkspaces: 64, MaxPerOwner: 8, RequireOwner: true, MaxConcurrent: 8, IdleTTL: 30 * time.Minute, MaxLifetime: 4 * time.Hour,
 		MaxCodeBytes: 256 << 10, MaxFileBytes: 1 << 20, Namespace: "idp-sbx-",

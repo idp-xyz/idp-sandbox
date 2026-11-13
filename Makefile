@@ -1,5 +1,5 @@
 # idp-sandbox build and test entry points.
-.PHONY: build vet test images test-integration e2e
+.PHONY: build vet test images office-image test-integration e2e
 
 build:
 	go build -o bin/ ./cmd/...
@@ -11,6 +11,10 @@ test: vet
 	go test -race ./internal/...
 
 # The runtime images are pulled by the operator, never by the service (a caller cannot make it fetch anything).
+# the office run profile's image (ADR-0001 D14): officecli pinned by version and SHA-256, built offline
+office-image:
+	bash deploy/office/build.sh
+
 images:
 	docker pull public.ecr.aws/docker/library/python:3.12-slim
 	docker pull public.ecr.aws/docker/library/alpine:3.22

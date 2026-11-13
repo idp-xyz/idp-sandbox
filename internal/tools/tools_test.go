@@ -217,3 +217,32 @@ func TestNetworkParameterFollowsTheOperatorsConfiguration(t *testing.T) {
 		}
 	}
 }
+
+// The office run profile (ADR-0001 D14) is offered only when the operator configured its image, and the schema says what each
+// language is, so the model can pick the right one.
+func TestOfficeLanguageFollowsTheOperatorsConfiguration(t *testing.T) {
+	langs := func(cfg sandbox.Config) ([]string, string) {
+		m, _ := sandbox.New(context.Background(), cfg, &fake{files: map[string][]byte{}}, slog.New(slog.DiscardHandler))
+		for _, tool := range New(m, slog.New(slog.DiscardHandler), nometrics{}) {
+			if tool.Name == "sandbox_run" {
+				p := tool.InputSchema["properties"].(map[string]any)["language"].(map[string]any)
+				return p["enum"].([]string), p["description"].(string)
+			}
+		}
+		t.Fatal("no sandbox_run")
+		return nil, ""
+	}
+	enum, desc := langs(sandbox.DefaultConfig("py", "sh"))
+	if fmt.Sprint(enum) != "[python shell]" || strings.Contains(desc, "officecli") || !strings.Contains(desc, "python: a Python 3 program") {
+		t.Fatalf("%v %q", enum, desc)
+	}
+	cfg := sandbox.DefaultConfig("py", "sh")
+	cfg.Languages["office"] = sandbox.OfficeLanguage("idp-sandbox-office:dev")
+	enum, desc = langs(cfg)
+	if fmt.Sprint(enum) != "[office python shell]" || !strings.Contains(desc, "office: a POSIX shell script with the officecli command") {
+		t.Fatalf("%v %q", enum, desc)
+	}
+	if cfg.Languages["office"].Image != "idp-sandbox-office:dev" || fmt.Sprint(cfg.Languages["office"].Command("main.sh")) != "[sh main.sh]" {
+		t.Fatalf("%+v", cfg.Languages["office"])
+	}
+}

@@ -9,6 +9,7 @@
 //	IDP_SANDBOX_METRICS        address of /healthz /readyz /metrics (default 127.0.0.1:9570)
 //	IDP_SANDBOX_DOCKER_HOST    default unix:///var/run/docker.sock
 //	IDP_SANDBOX_PYTHON_IMAGE   default python:3.12-slim      IDP_SANDBOX_SHELL_IMAGE  default alpine:3.22
+//	IDP_SANDBOX_OFFICE_IMAGE   the office run profile's image (ADR-0001 D14, deploy/office); unset = no language office
 //	IDP_SANDBOX_RUNTIME        OCI runtime of the runs, for example runsc (gVisor) or kata; default the daemon's
 //	IDP_SANDBOX_OWNER          label value that scopes the sweep (default "default")
 //	IDP_SANDBOX_MEMORY_MB IDP_SANDBOX_CPUS IDP_SANDBOX_PIDS IDP_SANDBOX_TIMEOUT_S IDP_SANDBOX_OUTPUT_KB
@@ -101,6 +102,9 @@ func main() {
 		os.Exit(2)
 	}
 	cfg := sandbox.DefaultConfig(env("IDP_SANDBOX_PYTHON_IMAGE", "python:3.12-slim"), env("IDP_SANDBOX_SHELL_IMAGE", "alpine:3.22"))
+	if img := os.Getenv("IDP_SANDBOX_OFFICE_IMAGE"); img != "" {
+		cfg.Languages["office"] = sandbox.OfficeLanguage(img)
+	}
 	cfg.Limits.MemoryBytes = envInt("IDP_SANDBOX_MEMORY_MB", cfg.Limits.MemoryBytes>>20) << 20
 	cfg.Limits.CPUs = float64(envInt("IDP_SANDBOX_CPUS", int64(cfg.Limits.CPUs)))
 	cfg.Limits.Pids = envInt("IDP_SANDBOX_PIDS", cfg.Limits.Pids)

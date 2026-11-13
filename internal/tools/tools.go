@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -96,6 +97,12 @@ func New(m *sandbox.Manager, log *slog.Logger, met Metrics) []mcp.Tool {
 		langs = append(langs, k)
 	}
 	sortStrings(langs)
+	var langDescription []string
+	for _, k := range langs {
+		if d := cfg.Languages[k].Description; d != "" {
+			langDescription = append(langDescription, k+": "+d)
+		}
+	}
 	networks, networkDescription := []string{"none"}, "Always none here: code has no network."
 	if cfg.EgressEnabled {
 		networks, networkDescription = []string{"none", "egress"}, "none (default): no network. egress: only the hosts the operator approved, through a proxy (HTTP_PROXY and HTTPS_PROXY are set)."
@@ -121,7 +128,7 @@ func New(m *sandbox.Manager, log *slog.Logger, met Metrics) []mcp.Tool {
 				cfg.Limits.Timeout, cfg.Limits.OutputBytes>>10),
 			InputSchema: obj(map[string]any{
 				"workspaceId":    idProp(),
-				"language":       map[string]any{"type": "string", "enum": langs},
+				"language":       map[string]any{"type": "string", "enum": langs, "description": strings.Join(langDescription, ". ") + "."},
 				"code":           map[string]any{"type": "string", "minLength": 1, "maxLength": cfg.MaxCodeBytes},
 				"timeoutSeconds": map[string]any{"type": "integer", "minimum": 1, "maximum": int(cfg.Limits.Timeout.Seconds())},
 				"network":        map[string]any{"type": "string", "enum": networks, "description": networkDescription},

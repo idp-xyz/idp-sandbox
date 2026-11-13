@@ -1,6 +1,7 @@
 // Integration tests against a real Docker daemon: the isolation claims of the sandbox, tried as an
 // attacker would. Skipped when no daemon answers (IDP_SANDBOX_DOCKER_HOST, default the local socket);
-// the images are python:3.12-slim and alpine:3.22 unless IDP_SANDBOX_PYTHON_IMAGE / _SHELL_IMAGE say otherwise.
+// the images are python:3.12-slim and alpine:3.22 unless IDP_SANDBOX_PYTHON_IMAGE / _SHELL_IMAGE say otherwise; the office
+// profile is tried when IDP_SANDBOX_OFFICE_IMAGE names the image of deploy/office/build.sh.
 package integration
 
 import (
@@ -394,5 +395,55 @@ func TestRunsUnderTheExpectedKernel(t *testing.T) {
 		if r2 := run(t, m, id, "shell", "dmesg | head -1"); !strings.Contains(r2.Stdout, "Starting gVisor") {
 			t.Fatalf("no gVisor in dmesg: %q", r2.Stdout)
 		}
+	}
+}
+
+// The office run profile (ADR-0001 D14) under the same isolation as every run: officecli creates, edits and reads back a
+// Word, an Excel and a PowerPoint file in the workspace, the files outlive the run, and nothing keeps running in the
+// background (no resident process, no .NET diagnostics pipes). Skipped unless IDP_SANDBOX_OFFICE_IMAGE names the image of
+// deploy/office/build.sh.
+func TestOfficeDocumentsInTheOfficeProfile(t *testing.T) {
+	img := os.Getenv("IDP_SANDBOX_OFFICE_IMAGE")
+	if img == "" {
+		t.Skip("IDP_SANDBOX_OFFICE_IMAGE not set (bash deploy/office/build.sh)")
+	}
+	m := setup(t, func(c *sandbox.Config) {
+		c.Languages["office"] = sandbox.OfficeLanguage(img)
+		c.Limits.Timeout, c.Limits.MemoryBytes = 30*time.Second, 256<<20 // a .NET start per command
+	})
+	id := ws(t, m)
+	r := run(t, m, id, "office", `set -e
+officecli create r.docx
+officecli add r.docx /body --type paragraph --prop text="季度汇报：营收增长 12%"
+officecli create s.xlsx
+officecli batch s.xlsx --commands '[{"command":"set","path":"/Sheet1/A1","props":{"value":"营收"}},{"command":"set","path":"/Sheet1/B1","props":{"value":"120"}}]'
+officecli create p.pptx
+officecli add p.pptx / --type slide
+officecli add p.pptx "/slide[1]" --type shape --prop text="第三季度汇报"
+for f in r.docx s.xlsx p.pptx; do officecli validate "$f"; done
+ls -A /tmp | wc -l`)
+	if r.ExitCode != 0 || strings.Count(r.Stdout, "Validation passed") != 3 || !strings.HasSuffix(strings.TrimSpace(r.Stdout), "0") {
+		t.Fatalf("%+v", r)
+	}
+	// a later run reads what the first one wrote
+	r = run(t, m, id, "office", `officecli view r.docx text; officecli view s.xlsx text; officecli view p.pptx text`)
+	for _, want := range []string{"季度汇报：营收增长 12%", "A1=营收", "B1=120", "第三季度汇报"} {
+		if !strings.Contains(r.Stdout, want) {
+			t.Fatalf("%q missing: %+v", want, r)
+		}
+	}
+	files, err := m.ListFiles(context.Background(), owner, id)
+	if err != nil || len(files) != 3 {
+		t.Fatalf("files: %v %v", files, err)
+	}
+	for _, f := range files {
+		if f.Size < 1000 {
+			t.Fatalf("%s is only %d bytes", f.Path, f.Size)
+		}
+	}
+	// still no network and no writable root from inside the profile
+	r = run(t, m, id, "office", `touch /usr/local/bin/x 2>/dev/null && echo writable; python -c "import socket; socket.create_connection(('1.1.1.1', 53), 2)" 2>/dev/null && echo network; echo done`)
+	if strings.Contains(r.Stdout, "writable") || strings.Contains(r.Stdout, "network") || !strings.Contains(r.Stdout, "done") {
+		t.Fatalf("%+v", r)
 	}
 }
