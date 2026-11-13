@@ -202,6 +202,16 @@ func (e *Engine) fileOp(ctx context.Context, workspace string, cmd []string, std
 		Limits: sandbox.Limits{MemoryBytes: 64 << 20, CPUs: 0.5, Pids: 32, OutputBytes: outLimit, WorkspaceBytes: e.WorkspaceBytes, TmpBytes: 1 << 20}})
 }
 
+// fileOpRaw is fileOp with the output taken from the attach stream: a file read returns its bytes unchanged, binary or
+// not, and is not bounded by the log driver's size (ADR-0001 D15).
+func (e *Engine) fileOpRaw(ctx context.Context, workspace string, cmd []string, outLimit int) (sandbox.RunResult, error) {
+	return e.Run(ctx, sandbox.RunSpec{Workspace: workspace, Image: e.HelperImage, Cmd: cmd, Timeout: 60 * time.Second, RawOutput: true,
+		Limits: sandbox.Limits{MemoryBytes: 64 << 20, CPUs: 0.5, Pids: 32, OutputBytes: outLimit, WorkspaceBytes: e.WorkspaceBytes, TmpBytes: 1 << 20}})
+}
+
+// BinaryFiles: the engine moves files byte for byte (stdin in, the attach stream out).
+func (e *Engine) BinaryFiles() bool { return true }
+
 func workspaceExists(res sandbox.RunResult, err error) error {
 	var a *apiError
 	if errors.As(err, &a) && a.Status == 404 {
@@ -233,7 +243,7 @@ func (e *Engine) ReadFile(ctx context.Context, workspace, p string, max int64) (
 	const script = `[ -f "$1" ] && [ ! -L "$1" ] || exit 44
 case "$(readlink -f "$1")" in /work/*) ;; *) exit 45;; esac
 cat "$1"`
-	res, err := e.fileOp(ctx, workspace, []string{"sh", "-c", script, "sh", "/work/" + p}, nil, int(max)+1)
+	res, err := e.fileOpRaw(ctx, workspace, []string{"sh", "-c", script, "sh", "/work/" + p}, int(max)+1)
 	if err != nil {
 		return nil, workspaceExists(res, err)
 	}
@@ -334,8 +344,8 @@ func (e *Engine) execute(ctx context.Context, id string, spec sandbox.RunSpec) (
 	}
 	var st streams
 	var stdinConn net.Conn
-	if spec.Stdin != nil {
-		c, err := e.attachStdin(ctx, id)
+	if spec.Stdin != nil || spec.RawOutput {
+		c, err := e.attachStdin(ctx, id, spec.Stdin != nil)
 		if err != nil {
 			return sandbox.RunResult{}, err
 		}
@@ -345,18 +355,24 @@ func (e *Engine) execute(ctx context.Context, id string, spec sandbox.RunSpec) (
 	if err := e.json(ctx, http.MethodPost, "/containers/"+id+"/start", nil, nil, nil); err != nil {
 		return sandbox.RunResult{}, err
 	}
-	if stdinConn != nil {
-		go func() { // feed the command and close its stdin; the container's output is read from the log
+	if stdinConn != nil && spec.Stdin != nil {
+		go func() { // feed the command and close its stdin
 			_, _ = stdinConn.Write(spec.Stdin)
 			if cw, ok := stdinConn.(interface{ CloseWrite() error }); ok {
 				_ = cw.CloseWrite()
 			}
-			_, _ = io.Copy(io.Discard, stdinConn)
+			if !spec.RawOutput { // the output is read from the log
+				_, _ = io.Copy(io.Discard, stdinConn)
+			}
 		}()
 	}
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
+		if spec.RawOutput { // byte for byte from the attach stream (same framing as the log), past any log driver
+			st.truncated, _ = demux(stdinConn, &st.out, &st.err, lim.OutputBytes, func() { _ = e.kill(id) })
+			return
+		}
 		resp, err := e.do(runCtx, http.MethodGet, "/containers/"+id+"/logs", url.Values{"stdout": {"1"}, "stderr": {"1"}, "follow": {"1"}}, nil, "")
 		if err != nil {
 			return
@@ -391,6 +407,9 @@ func (e *Engine) execute(ctx context.Context, id string, spec sandbox.RunSpec) (
 	case <-done:
 	case <-time.After(5 * time.Second):
 		cancel()
+		if spec.RawOutput { // the attach stream is not bound to runCtx
+			_ = stdinConn.Close()
+		}
 		<-done
 	}
 	var insp struct {
@@ -484,7 +503,7 @@ func (e *Engine) Sweep(ctx context.Context) error {
 
 // attachStdin opens the Engine's raw attach stream (an HTTP upgrade, which net/http does not expose)
 // to the created container's stdin.
-func (e *Engine) attachStdin(ctx context.Context, id string) (net.Conn, error) {
+func (e *Engine) attachStdin(ctx context.Context, id string, stdin bool) (net.Conn, error) {
 	tr, ok := e.http.Transport.(*http.Transport)
 	if !ok || tr.DialContext == nil {
 		return nil, errors.New("no dialer")
@@ -494,7 +513,11 @@ func (e *Engine) attachStdin(ctx context.Context, id string) (net.Conn, error) {
 		return nil, err
 	}
 	fail := func(err error) (net.Conn, error) { conn.Close(); return nil, err }
-	req := fmt.Sprintf("POST /%s/containers/%s/attach?stream=1&stdin=1&stdout=1&stderr=1 HTTP/1.1\r\nHost: docker\r\nConnection: Upgrade\r\nUpgrade: tcp\r\nContent-Length: 0\r\n\r\n", apiVersion, id)
+	in := "0"
+	if stdin {
+		in = "1"
+	}
+	req := fmt.Sprintf("POST /%s/containers/%s/attach?stream=1&stdin=%s&stdout=1&stderr=1 HTTP/1.1\r\nHost: docker\r\nConnection: Upgrade\r\nUpgrade: tcp\r\nContent-Length: 0\r\n\r\n", apiVersion, id, in)
 	_ = conn.SetDeadline(time.Now().Add(15 * time.Second))
 	if _, err := io.WriteString(conn, req); err != nil {
 		return fail(err)

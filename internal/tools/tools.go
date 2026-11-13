@@ -15,6 +15,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"idp-sandbox/internal/files"
 	"idp-sandbox/internal/mcp"
 	"idp-sandbox/internal/sandbox"
 )
@@ -90,6 +91,12 @@ func short(id string) string {
 
 // New returns the tools.
 func New(m *sandbox.Manager, log *slog.Logger, met Metrics) []mcp.Tool {
+	return NewWithFiles(m, log, met, nil)
+}
+
+// NewWithFiles returns the tools, with sandbox_import_file and sandbox_export_file when the operator configured the
+// Workspace's file endpoint and the backend moves files byte for byte (ADR-0001 D15).
+func NewWithFiles(m *sandbox.Manager, log *slog.Logger, met Metrics, fc *files.Client) []mcp.Tool {
 	a := &api{m: m, log: log, met: met}
 	cfg := m.Config()
 	langs := []string{}
@@ -108,7 +115,7 @@ func New(m *sandbox.Manager, log *slog.Logger, met Metrics) []mcp.Tool {
 		networks, networkDescription = []string{"none", "egress"}, "none (default): no network. egress: only the hosts the operator approved, through a proxy (HTTP_PROXY and HTTPS_PROXY are set)."
 	}
 	pathProp := map[string]any{"type": "string", "minLength": 1, "maxLength": 255, "description": "A path relative to the workspace, for example data/input.csv."}
-	return []mcp.Tool{
+	tools := []mcp.Tool{
 		{Name: "sandbox_create",
 			Description: fmt.Sprintf("Create an empty, private workspace for running code. It has no network, %d MiB of memory per run, %d MiB of files, and is deleted after %s without use. Returns the workspace id every other sandbox tool needs.",
 				cfg.Limits.MemoryBytes>>20, cfg.Limits.WorkspaceBytes>>20, cfg.IdleTTL),
@@ -252,6 +259,10 @@ func New(m *sandbox.Manager, log *slog.Logger, met Metrics) []mcp.Tool {
 				return mcp.Result{Text: "deleted"}, "ws=" + short(in.WorkspaceID)
 			})},
 	}
+	if fc != nil && m.TransfersSupported() {
+		tools = append(tools, transferTools(a, m, fc)...)
+	}
+	return tools
 }
 
 // decodeFile reads workspaceId, path and (optionally) content.

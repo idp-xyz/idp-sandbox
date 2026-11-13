@@ -27,6 +27,9 @@ type RunSpec struct {
 	Limits    Limits
 	Timeout   time.Duration
 	Stdin     []byte // fed to the command, then closed; nil attaches nothing
+	// RawOutput reads stdout and stderr from the attach stream instead of the container's log: byte for byte, whatever the
+	// content and size (a log driver re-encodes and rotates). File reads use it (ADR-0001 D15).
+	RawOutput bool
 	// Egress gives the run a path to the operator's allow-listed proxy and nothing else (ADR-0001 D12).
 	Egress bool
 }
@@ -51,6 +54,13 @@ type FileInfo struct {
 // Backend is the isolation layer. The Docker backend (internal/engine) hardens runc containers;
 // a gVisor or Kata runtime is a configuration of the same backend, a Kubernetes Job backend would
 // be another implementation of this interface.
+// BinaryFiles is a Backend that moves any bytes, of up to the transfer limit, in and out of a workspace: the import and
+// export tools are offered only on one (ADR-0001 D15). The Kubernetes backend is not one: its files travel in ConfigMaps
+// (about 1 MiB) and come back through pod logs.
+type BinaryFiles interface {
+	BinaryFiles() bool
+}
+
 type Backend interface {
 	Ping(ctx context.Context) error
 	CreateWorkspace(ctx context.Context, name string, sizeBytes int64) error

@@ -46,7 +46,9 @@ type Config struct {
 	MaxLifetime   time.Duration
 	MaxCodeBytes  int
 	MaxFileBytes  int64
-	Namespace     string // prefix of workspace names
+	// MaxTransferBytes bounds a file imported from or exported to the Workspace (ADR-0001 D15); 0 = no transfers.
+	MaxTransferBytes int64
+	Namespace        string // prefix of workspace names
 }
 
 // DefaultConfig is conservative: 256 MiB, one CPU, 64 processes, 20 s, 64 KiB of output, 64 MiB workspace.
@@ -63,7 +65,7 @@ func DefaultConfig(pythonImage, shellImage string) Config {
 			}, Description: "a POSIX shell script"},
 		},
 		MaxWorkspaces: 64, MaxPerOwner: 8, RequireOwner: true, MaxConcurrent: 8, IdleTTL: 30 * time.Minute, MaxLifetime: 4 * time.Hour,
-		MaxCodeBytes: 256 << 10, MaxFileBytes: 1 << 20, Namespace: "idp-sbx-",
+		MaxCodeBytes: 256 << 10, MaxFileBytes: 1 << 20, MaxTransferBytes: 25 << 20, Namespace: "idp-sbx-",
 	}
 }
 
@@ -263,6 +265,39 @@ func (m *Manager) ReadFile(ctx context.Context, owner, id, p string) ([]byte, er
 		return nil, err
 	}
 	return m.be.ReadFile(ctx, m.cfg.Namespace+id, p, m.cfg.MaxFileBytes)
+}
+
+// TransfersSupported reports whether files can move byte for byte between the Workspace and a workspace on this backend.
+func (m *Manager) TransfersSupported() bool {
+	b, ok := m.be.(BinaryFiles)
+	return ok && b.BinaryFiles() && m.cfg.MaxTransferBytes > 0
+}
+
+// PutBytes stores any bytes of up to MaxTransferBytes (an imported file); the caller has checked what they are.
+func (m *Manager) PutBytes(ctx context.Context, owner, id, p string, data []byte) error {
+	p, err := CleanPath(p)
+	if err != nil {
+		return err
+	}
+	if int64(len(data)) > m.cfg.MaxTransferBytes {
+		return ErrFileTooLarge
+	}
+	if err := m.acquire(owner, id, false); err != nil {
+		return err
+	}
+	return m.be.WriteFile(ctx, m.cfg.Namespace+id, p, data)
+}
+
+// GetBytes returns a file of up to MaxTransferBytes, byte for byte (a file to export).
+func (m *Manager) GetBytes(ctx context.Context, owner, id, p string) ([]byte, error) {
+	p, err := CleanPath(p)
+	if err != nil {
+		return nil, err
+	}
+	if err := m.acquire(owner, id, false); err != nil {
+		return nil, err
+	}
+	return m.be.ReadFile(ctx, m.cfg.Namespace+id, p, m.cfg.MaxTransferBytes)
 }
 
 // ListFiles lists the regular files of the workspace (the runner's own scratch directory excluded).

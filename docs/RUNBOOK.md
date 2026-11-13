@@ -34,6 +34,8 @@
 | `IDP_SANDBOX_IDLE_MIN` | 工作区空闲多久回收 | 30（存活上限 4 小时）|
 | `IDP_SANDBOX_PYTHON_IMAGE` / `_SHELL_IMAGE` | 运行镜像（运维选，调用者不能选；由运维拉取，服务不拉）| `python:3.12-slim` / `alpine:3.22` |
 | `IDP_SANDBOX_OFFICE_IMAGE` | office 运行档位的镜像（ADR-0001 D14）：`bash deploy/office/build.sh` 构建（OfficeCLI 版本与 SHA-256 钉在脚本里，离网构建并冒烟）；设了才有 `language: office` | 无（不提供 office）|
+| `IDP_SANDBOX_FILES_URL` | Workspace 的内部文件端点（例 `http://workspace:8560/internal/v1/files`）；设了才有 `sandbox_import_file` / `sandbox_export_file`（ADR-0001 D15）。只限 Docker 后端：Kubernetes 后端设了会拒绝启动 | 无（不搬文件）|
+| `IDP_SANDBOX_TRANSFER_MB` | 搬进搬出的单个文件上限，不得大于 `IDP_SANDBOX_WORKSPACE_MB` | 25 |
 | `IDP_SANDBOX_RUNTIME` | Docker：OCI 运行时（`runsc`、`kata`）| 守护进程默认 |
 | `IDP_SANDBOX_RUNTIME_CLASS` | Kubernetes：RuntimeClass | 无 |
 | `IDP_SANDBOX_EGRESS_PROXY` / `_EGRESS_PORT` | 出口代理容器名与端口；设了才有 `network: egress` | 关 |

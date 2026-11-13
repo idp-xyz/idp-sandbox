@@ -19,6 +19,9 @@
 //	                           server in idp-mcp with identity=forward); false only for a standalone development run
 //	IDP_SANDBOX_MAX_PER_CALLER  workspaces one caller may hold (default 8)
 //	IDP_SANDBOX_WORKSPACE_MB IDP_SANDBOX_MAX_WORKSPACES IDP_SANDBOX_MAX_CONCURRENT IDP_SANDBOX_IDLE_MIN
+//	IDP_SANDBOX_FILES_URL       the Workspace's internal file endpoint (e.g. http://workspace:8560/internal/v1/files); set,
+//	                           it offers sandbox_import_file and sandbox_export_file (ADR-0001 D15; docker backend only)
+//	IDP_SANDBOX_TRANSFER_MB     largest file moved in or out (default 25; at most the workspace's size)
 package main
 
 import (
@@ -36,6 +39,7 @@ import (
 	"time"
 
 	"idp-sandbox/internal/engine"
+	"idp-sandbox/internal/files"
 	"idp-sandbox/internal/mcp"
 	"idp-sandbox/internal/sandbox"
 	"idp-sandbox/internal/tools"
@@ -116,6 +120,11 @@ func main() {
 	cfg.MaxPerOwner = int(envInt("IDP_SANDBOX_MAX_PER_CALLER", int64(cfg.MaxPerOwner)))
 	cfg.RequireOwner = os.Getenv("IDP_SANDBOX_REQUIRE_CALLER") != "false"
 	cfg.IdleTTL = time.Duration(envInt("IDP_SANDBOX_IDLE_MIN", int64(cfg.IdleTTL.Minutes()))) * time.Minute
+	cfg.MaxTransferBytes = envInt("IDP_SANDBOX_TRANSFER_MB", cfg.MaxTransferBytes>>20) << 20
+	if cfg.MaxTransferBytes > cfg.Limits.WorkspaceBytes {
+		fmt.Fprintln(os.Stderr, "IDP_SANDBOX_TRANSFER_MB is larger than the workspace (IDP_SANDBOX_WORKSPACE_MB)")
+		os.Exit(2)
+	}
 
 	var be sandbox.Backend
 	switch backend := env("IDP_SANDBOX_BACKEND", "docker"); backend {
@@ -158,9 +167,18 @@ func main() {
 		os.Exit(1)
 	}
 	met := &metrics{counts: map[[2]string]int64{}, nanos: map[string]int64{}}
+	var fc *files.Client
+	if u := os.Getenv("IDP_SANDBOX_FILES_URL"); u != "" {
+		if !mgr.TransfersSupported() {
+			fmt.Fprintln(os.Stderr, "IDP_SANDBOX_FILES_URL is set but this backend does not move files byte for byte (docker only)")
+			os.Exit(2)
+		}
+		fc = files.NewClient(u, cfg.MaxTransferBytes)
+		log.Info("file transfers enabled", "endpoint", u, "maxMB", cfg.MaxTransferBytes>>20)
+	}
 	srv := mcp.New("idp-sandbox", version,
 		"Runs code in an isolated sandbox: create a workspace, write files, run Python or shell, read the results. There is no network and nothing persists beyond the workspace.",
-		tools.New(mgr, log, met))
+		tools.NewWithFiles(mgr, log, met, fc))
 
 	mux := http.NewServeMux()
 	mux.Handle("/mcp", srv)

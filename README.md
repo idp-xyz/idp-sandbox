@@ -20,7 +20,7 @@ IDP TELOS 的 Agent 执行沙箱：一个 MCP 服务器，让 Agent 在隔离的
 
 ## 工具
 
-`sandbox_create`、`sandbox_run`（`python`、`shell`，运维配置了 office 镜像时还有 `office`：带 [OfficeCLI](https://github.com/iOfficeAI/OfficeCLI) 的 shell，读写 Word / Excel / PowerPoint，ADR-0001 D14）、`sandbox_write_file`、`sandbox_read_file`、`sandbox_list_files`、`sandbox_delete`。经网关时名字带上目标名前缀（`sandbox__sandbox_run`）。
+`sandbox_create`、`sandbox_run`（`python`、`shell`，运维配置了 office 镜像时还有 `office`：带 [OfficeCLI](https://github.com/iOfficeAI/OfficeCLI) 的 shell，读写 Word / Excel / PowerPoint，ADR-0001 D14）、`sandbox_write_file`、`sandbox_read_file`、`sandbox_list_files`、`sandbox_delete`；运维配置了 Workspace 的文件端点时还有 `sandbox_import_file`、`sandbox_export_file`：把成员附上的文件拷进工作区、把做好的文件交给成员，字节不经过模型（ADR-0001 D15）。经网关时名字带上目标名前缀（`sandbox__sandbox_run`）。
 
 运维手册：[`docs/RUNBOOK.md`](docs/RUNBOOK.md)（接入、后端、配置、故障排查、安全边界）。
 
