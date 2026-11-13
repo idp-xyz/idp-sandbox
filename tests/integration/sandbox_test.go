@@ -441,6 +441,15 @@ ls -A /tmp | wc -l`)
 			t.Fatalf("%s is only %d bytes", f.Path, f.Size)
 		}
 	}
+	// an agent that opens a resident anyway (officecli open, as OfficeCLI's own references advise) and never closes it loses
+	// nothing: the resident dies with the run, but every change was flushed at once (OFFICECLI_RESIDENT_FLUSH=each)
+	r = run(t, m, id, "office", `officecli open r.docx && officecli add r.docx /body --type paragraph --prop text="常驻进程里的修改"`)
+	if r.ExitCode != 0 {
+		t.Fatalf("%+v", r)
+	}
+	if r = run(t, m, id, "office", `officecli view r.docx text`); !strings.Contains(r.Stdout, "常驻进程里的修改") {
+		t.Fatalf("the change made through a resident was lost: %+v", r)
+	}
 	// still no network and no writable root from inside the profile
 	r = run(t, m, id, "office", `touch /usr/local/bin/x 2>/dev/null && echo writable; python -c "import socket; socket.create_connection(('1.1.1.1', 53), 2)" 2>/dev/null && echo network; echo done`)
 	if strings.Contains(r.Stdout, "writable") || strings.Contains(r.Stdout, "network") || !strings.Contains(r.Stdout, "done") {
