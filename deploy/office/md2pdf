@@ -1,0 +1,611 @@
+#!/usr/bin/env python3
+"""Write a PDF from a Markdown file: headings, paragraphs, lists, tables, code, quotes and pictures.
+
+For the office sandbox. Chinese, Japanese and Korean text is set in Noto Sans SC, which the PDF embeds, so the file
+reads the same on every machine. Needs reportlab (and Pillow for pictures); reading the Markdown needs neither.
+"""
+
+import argparse
+import html
+import json
+import os
+import re
+import sys
+import unicodedata
+
+FONT_DIR = os.environ.get("MD2PDF_FONT_DIR", "/usr/share/fonts/truetype/noto")
+FONT, BOLD = "NotoSansSC", "NotoSansSC-Bold"
+FONT_FILES = {FONT: "NotoSansSC-Regular.ttf", BOLD: "NotoSansSC-Bold.ttf"}
+WIDE_TABLE = 9  # columns from which a table turns the pages to landscape
+
+USAGE = """usage: md2pdf IN.md OUT.pdf [--title TITLE] [--landscape]
+       md2pdf --dump IN.md
+
+  Sets headings, paragraphs, lists, tables, fenced code, quotes, rules, links and local PNG or JPEG pictures on A4.
+  A table of nine or more columns turns the pages to landscape.
+  --title      the document's title (default: its first heading, else the file name)
+  --landscape  landscape pages
+  --dump       print how the Markdown was read, as JSON, and write nothing"""
+
+FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})[ \t]*([^`]*)$")
+HEADING = re.compile(r"^ {0,3}(#{1,6})(?:[ \t]+(.*))?$")
+RULE = re.compile(r"^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$")
+SETEXT = re.compile(r"^ {0,3}(=+|-+)[ \t]*$")
+BULLET = re.compile(r"^([ \t]*)[-*+][ \t]+(.*)$")
+NUMBER = re.compile(r"^([ \t]*)(\d{1,9})[.)][ \t]+(.*)$")
+QUOTE = re.compile(r"^ {0,3}>[ \t]?(.*)$")
+CELL_RULE = re.compile(r":?-+:?")
+PICTURE = re.compile(r'^!\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)$')
+
+
+class Failure(Exception):
+    pass
+
+
+class Arguments(argparse.ArgumentParser):
+    def error(self, message):
+        raise Failure("usage")
+
+
+# ---- reading the Markdown ----
+
+
+def wide(ch):
+    """A character that takes a full cell: Chinese, Japanese, Korean and their punctuation."""
+    return bool(ch) and unicodedata.east_asian_width(ch) in ("W", "F")
+
+
+def glue(left, right):
+    """What joins two source lines of one paragraph: nothing between two wide characters, a space otherwise."""
+    return "" if wide(left[-1:]) and wide(right[:1]) else " "
+
+
+def join(lines):
+    out = ""
+    for k, (text, hard) in enumerate(lines):
+        if k:
+            out += "\n" if lines[k - 1][1] else glue(out, text)
+        out += text
+    return out
+
+
+def split_row(line):
+    """The cells of a table row; \\| is a literal bar."""
+    line = line.strip()
+    if line.startswith("|"):
+        line = line[1:]
+    if line.endswith("|") and not line.endswith("\\|"):
+        line = line[:-1]
+    cells, cur, i = [], "", 0
+    while i < len(line):
+        if line.startswith("\\|", i):
+            cur, i = cur + "|", i + 2
+            continue
+        if line[i] == "|":
+            cells.append(cur.strip())
+            cur = ""
+        else:
+            cur += line[i]
+        i += 1
+    cells.append(cur.strip())
+    return cells
+
+
+def table_at(lines, i):
+    """The table whose header is line i, and the line after it; None when line i does not start one."""
+    if i + 1 >= len(lines) or "|" not in lines[i]:
+        return None
+    head, rule = split_row(lines[i]), split_row(lines[i + 1])
+    if len(head) != len(rule) or not all(CELL_RULE.fullmatch(c) for c in rule):
+        return None
+    align = ["center" if c[0] == c[-1] == ":" and len(c) > 1 else "right" if c[-1] == ":" else "left" for c in rule]
+    rows, i = [], i + 2
+    while i < len(lines) and lines[i].strip() and "|" in lines[i] and not FENCE.match(lines[i]):
+        cells = split_row(lines[i])
+        rows.append((cells + [""] * len(head))[: len(head)])
+        i += 1
+    return {"type": "table", "align": align, "header": head, "rows": rows}, i
+
+
+def starts_block(lines, i):
+    line = lines[i]
+    return bool(FENCE.match(line) or HEADING.match(line) or RULE.match(line) or QUOTE.match(line) or table_at(lines, i))
+
+
+def list_at(lines, i):
+    """The list that starts at line i (items carry their depth and, when numbered, their number), and the line after it."""
+    items, depths, numbers, gap = [], [], {}, False
+    while i < len(lines):
+        line = lines[i]
+        if not line.strip():
+            j = i
+            while j < len(lines) and not lines[j].strip():
+                j += 1
+            if j < len(lines) and (BULLET.match(lines[j]) or NUMBER.match(lines[j]) or lines[j][:1] in (" ", "\t")):
+                gap, i = True, j
+                continue
+            break
+        if RULE.match(line) or FENCE.match(line):
+            break
+        bullet, number = BULLET.match(line), NUMBER.match(line)
+        if bullet or number:
+            indent = len((bullet or number).group(1).expandtabs(4))
+            while depths and indent < depths[-1]:
+                depths.pop()
+            if not depths or indent > depths[-1]:
+                depths.append(indent)
+            level = len(depths) - 1
+            for deeper in [k for k in numbers if k > level]:
+                del numbers[deeper]
+            if number:
+                n = numbers.get(level) or int(number.group(2))
+                numbers[level] = n + 1
+                items.append({"level": level, "marker": f"{n}.", "text": number.group(3).strip()})
+            else:
+                numbers.pop(level, None)
+                items.append({"level": level, "marker": "", "text": bullet.group(2).strip()})
+        elif items and (line[:1] in (" ", "\t") or not starts_block(lines, i)):
+            more, text = line.strip(), items[-1]["text"]
+            items[-1]["text"] = text + ("\n" if gap else glue(text, more)) + more if text else more
+        else:
+            break
+        gap = False
+        i += 1
+    return {"type": "list", "items": items}, i
+
+
+def parse(lines):
+    """The blocks of a Markdown text."""
+    blocks, para, i = [], [], 0
+
+    def flush():
+        if para:
+            blocks.append({"type": "p", "text": join(para)})
+            del para[:]
+
+    while i < len(lines):
+        line = lines[i]
+        fence = FENCE.match(line)
+        if fence:
+            flush()
+            mark, indent = fence.group(1), len(line) - len(line.lstrip())
+            closing = re.compile(r"^[ \t]*" + re.escape(mark[0]) + "{%d,}[ \t]*$" % len(mark))
+            body, i = [], i + 1
+            while i < len(lines) and not closing.match(lines[i]):
+                body.append(lines[i][min(indent, len(lines[i]) - len(lines[i].lstrip())):])
+                i += 1
+            blocks.append({"type": "code", "lang": fence.group(2).strip(), "text": "\n".join(body)})
+            i += 1
+            continue
+        if not line.strip():
+            flush()
+            i += 1
+            continue
+        heading = HEADING.match(line)
+        if heading:
+            flush()
+            text = re.sub(r"(^|[ \t]+)#+[ \t]*$", "", (heading.group(2) or "").strip()).strip()
+            blocks.append({"type": "h", "level": len(heading.group(1)), "text": text})
+            i += 1
+            continue
+        table = table_at(lines, i)
+        if table:
+            flush()
+            blocks.append(table[0])
+            i = table[1]
+            continue
+        if para and SETEXT.match(line):
+            text = join(para)
+            del para[:]
+            blocks.append({"type": "h", "level": 1 if "=" in line else 2, "text": text})
+            i += 1
+            continue
+        if RULE.match(line):
+            flush()
+            blocks.append({"type": "hr"})
+            i += 1
+            continue
+        if QUOTE.match(line):
+            flush()
+            inner = []
+            while i < len(lines) and QUOTE.match(lines[i]):
+                inner.append(QUOTE.match(lines[i]).group(1))
+                i += 1
+            blocks.append({"type": "quote", "blocks": parse(inner)})
+            continue
+        if BULLET.match(line) or NUMBER.match(line):
+            flush()
+            block, i = list_at(lines, i)
+            blocks.append(block)
+            continue
+        text = line.strip()
+        hard = line.endswith("  ") or text.endswith("\\")
+        para.append((text[:-1].rstrip() if text.endswith("\\") else text, hard))
+        i += 1
+    flush()
+    return blocks
+
+
+def read(path):
+    """The blocks of the Markdown file and the title its front matter gives, if any."""
+    try:
+        with open(path, "rb") as f:
+            text = f.read().decode("utf-8-sig")
+    except OSError as err:
+        raise Failure(f"{path}: {err.strerror or err}")
+    except UnicodeDecodeError:
+        raise Failure(f"{path} is not UTF-8 text")
+    text = text.replace("\r\n", "\n").replace("\r", "\n").replace("\x00", "")
+    text = re.sub(r"<!--.*?-->", "", text, flags=re.S)
+    lines = [line.expandtabs(4) for line in text.split("\n")]
+    title = ""
+    if lines and lines[0].strip() == "---":
+        # front matter is metadata, not content. Only "key: value" lines count: a rule that opens the text stays a rule
+        for end in range(1, min(len(lines), 60)):
+            if lines[end].strip() in ("---", "..."):
+                for meta in lines[1:end]:
+                    m = re.match(r"^title:\s*(.+?)\s*$", meta)
+                    if m:
+                        title = m.group(1).strip("\"'")
+                lines = lines[end + 1:]
+                break
+            if lines[end].strip() and not re.match(r"^([A-Za-z_][\w .-]*:(\s.*)?|\s+\S.*)$", lines[end]):
+                break
+    return parse(lines), title
+
+
+# ---- inline marks, as the markup of a reportlab paragraph ----
+
+
+def esc(text):
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def inline(text):
+    kept = []
+
+    def keep(markup):
+        kept.append(markup)
+        return "\x00%d\x00" % (len(kept) - 1)
+
+    def code(m):
+        body = m.group(2)
+        if len(body) > 2 and body[0] == body[-1] == " ":
+            body = body[1:-1]
+        face = ' face="Courier"' if body.isascii() else ""  # Courier has no Chinese
+        return keep(f'<font{face} backColor="#f0f0f0">{esc(body)}</font>')
+
+    def link(m):
+        return keep('<a href="%s" color="#1a5fb4">' % html.escape(m.group(2), quote=True)) + m.group(1) + keep("</a>")
+
+    def bare(m):
+        return keep('<a href="%s" color="#1a5fb4">%s</a>' % (html.escape(m.group(1), quote=True), esc(m.group(1))))
+
+    text = re.sub(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)", code, text)
+    text = re.sub(r"\\([!-/:-@\[-`{-~])", lambda m: keep(esc(m.group(1))), text)
+    text = re.sub(r'!\[([^\]]*)\]\(\s*<?[^)\s>]+>?(?:\s+"[^"]*")?\s*\)', lambda m: keep(esc("[%s]" % (m.group(1) or "picture"))), text)
+    text = re.sub(r'\[([^\]]+)\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)', link, text)
+    text = re.sub(r"<((?:https?://|mailto:)[^>\s]+)>", bare, text)
+    text = re.sub(r"<br\s*/?>", lambda m: keep("<br/>"), text, flags=re.I)
+    text = esc(text)
+    text = re.sub(r"(\*\*\*|___)(?=\S)(.+?)(?<=\S)\1", r"<b>\2</b>", text)
+    text = re.sub(r"\*\*(?=\S)(.+?)(?<=\S)\*\*", r"<b>\1</b>", text)
+    text = re.sub(r"(?<![\w_])__(?=\S)(.+?)(?<=\S)__(?![\w_])", r"<b>\1</b>", text)
+    text = re.sub(r"(?<!\*)\*(?=[^\s*])(.+?)(?<=[^\s*])\*(?!\*)", r"<i>\1</i>", text)
+    text = re.sub(r"(?<![\w_])_(?=[^\s_])(.+?)(?<=[^\s_])_(?![\w_])", r"<i>\1</i>", text)
+    text = re.sub(r"~~(?=\S)(.+?)(?<=\S)~~", r"<strike>\1</strike>", text)
+    text = text.replace("\n", "<br/>")
+    return re.sub(r"\x00(\d+)\x00", lambda m: kept[int(m.group(1))], text)
+
+
+def plain(markup):
+    """The text a markup shows, for measuring and for the title."""
+    return html.unescape(re.sub(r"<[^>]+>", "", markup.replace("<br/>", "\n")))
+
+
+def dumped(blocks):
+    out = []
+    for block in blocks:
+        block = dict(block)
+        if block["type"] in ("p", "h"):
+            block["markup"] = inline(block["text"])
+        elif block["type"] == "list":
+            block["items"] = [dict(item, markup=inline(item["text"])) for item in block["items"]]
+        elif block["type"] == "quote":
+            block["blocks"] = dumped(block["blocks"])
+        out.append(block)
+    return out
+
+
+def tables(blocks):
+    for block in blocks:
+        if block["type"] == "table":
+            yield block
+        elif block["type"] == "quote":
+            yield from tables(block["blocks"])
+
+
+# ---- setting the pages ----
+
+
+def render(blocks, out, title, sideways, base):
+    """Writes the PDF and returns (pages, pictures left out)."""
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+        from reportlab.lib.pagesizes import A4, landscape
+        from reportlab.lib.styles import ParagraphStyle
+        from reportlab.lib.units import mm
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.pdfgen import canvas
+        from reportlab.platypus import HRFlowable, Image, Paragraph, SimpleDocTemplate, Table, TableStyle
+        from reportlab.platypus.doctemplate import LayoutError
+    except ImportError as err:
+        raise Failure(f"md2pdf needs the reportlab package, which the office image carries ({err})")
+    for name, file in FONT_FILES.items():
+        path = os.path.join(FONT_DIR, file)
+        if not os.path.isfile(path):
+            raise Failure(f"the font {path} is missing")
+        pdfmetrics.registerFont(TTFont(name, path))
+    pdfmetrics.registerFontFamily(FONT, normal=FONT, bold=BOLD, italic=FONT, boldItalic=BOLD)  # the font has no italic
+
+    page = landscape(A4) if sideways else A4
+    margin, top, bottom = 18 * mm, 16 * mm, 18 * mm
+    width = page[0] - 2 * margin - 12  # a frame keeps 6 points clear on each side
+    height = page[1] - top - bottom - 12
+    ink, grey, shade = colors.HexColor("#1b1b1b"), colors.HexColor("#5a5a5a"), colors.HexColor("#f4f4f4")
+    body = ParagraphStyle("body", fontName=FONT, fontSize=10.5, leading=17, textColor=ink, spaceAfter=7, alignment=TA_LEFT)
+    heads = {
+        1: ParagraphStyle("h1", parent=body, fontName=BOLD, fontSize=20, leading=28, spaceBefore=4, spaceAfter=10, keepWithNext=1),
+        2: ParagraphStyle("h2", parent=body, fontName=BOLD, fontSize=15.5, leading=23, spaceBefore=12, spaceAfter=7, keepWithNext=1),
+        3: ParagraphStyle("h3", parent=body, fontName=BOLD, fontSize=13, leading=20, spaceBefore=10, spaceAfter=5, keepWithNext=1),
+        4: ParagraphStyle("h4", parent=body, fontName=BOLD, fontSize=11.5, leading=18, spaceBefore=8, spaceAfter=4, keepWithNext=1),
+    }
+    derived, missing = {}, []
+
+    def variant(style, **changes):
+        """A style with a few attributes changed; made once."""
+        key = (style.name,) + tuple(sorted(changes.items()))
+        if key not in derived:
+            derived[key] = ParagraphStyle("-".join(str(part) for part in key), parent=style, **changes)
+        return derived[key]
+
+    def paragraph(text, style, bullet=None):
+        if any(wide(ch) for ch in text):
+            style = variant(style, wordWrap="CJK")  # break between any two characters, by the rules for Chinese
+        try:
+            return Paragraph(inline(text), style, bulletText=bullet)
+        except ValueError:  # marks that do not nest: show the text as it was written
+            return Paragraph(esc(text).replace("\n", "<br/>"), style, bulletText=bullet)
+
+    def fit(line, face, size, room):
+        """A line of code cut into pieces that fit the width."""
+        if pdfmetrics.stringWidth(line, face, size) <= room:
+            return [line]
+        pieces, cur = [], ""
+        for ch in line:
+            if cur and pdfmetrics.stringWidth(cur + ch, face, size) > room:
+                pieces.append(cur)
+                cur = ch
+            else:
+                cur += ch
+        return pieces + [cur]
+
+    def code(text, room):
+        # one row a line, so that a long listing breaks across pages with its background
+        text = "".join(ch for ch in text if ch == "\n" or ch >= " ")
+        face, size, lead = ("Courier" if text.isascii() else FONT), 8.5, 12
+        lines = [piece for line in text.split("\n") for piece in fit(line, face, size, room - 16)]
+        block = Table([[""]] + [[line] for line in lines] + [[""]], colWidths=[room], rowHeights=[4] + [lead] * len(lines) + [4],
+                      hAlign="LEFT", spaceBefore=3, spaceAfter=9)
+        block.setStyle(TableStyle([("FONT", (0, 0), (-1, -1), face, size, lead), ("TEXTCOLOR", (0, 0), (-1, -1), ink),
+                                   ("BACKGROUND", (0, 0), (-1, -1), shade), ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                                   ("RIGHTPADDING", (0, 0), (-1, -1), 8), ("TOPPADDING", (0, 0), (-1, -1), 0),
+                                   ("BOTTOMPADDING", (0, 0), (-1, -1), 0), ("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
+        return block
+
+    def table(block, room):
+        columns = len(block["header"])
+        size = 9.5 if columns <= 6 else 9 if columns <= 8 else 8 if columns <= 12 else 7
+        lead, pad = size * 1.45, 4
+        source = [block["header"]] + block["rows"]
+        marks = [[inline(cell) for cell in row] for row in source]
+        shown = [[plain(mark) for mark in row] for row in marks]
+
+        def span(text, bold):
+            return max(pdfmetrics.stringWidth(part, BOLD if bold else FONT, size) for part in text.split("\n"))
+
+        def stiff(text, bold):
+            """The width a cell cannot go below: all of a short cell (a label, a code, a number), else its longest word."""
+            if span(text, bold) <= 9 * size:
+                return span(text, bold)
+            best, piece = 0, ""
+            for ch in text + " ":
+                if ch.isspace() or wide(ch):
+                    best = max(best, pdfmetrics.stringWidth(piece, BOLD if bold else FONT, size), size if wide(ch) else 0)
+                    piece = ""
+                else:
+                    piece += ch
+            return best
+
+        natural = [max(span(shown[r][c], r == 0) for r in range(len(shown))) + 2 * pad + 1 for c in range(columns)]
+        if sum(natural) <= room:
+            widths = natural
+        else:
+            # too wide: a column keeps what its longest word needs, so that codes and numbers stay whole, and the room
+            # left is shared among the columns of running text, which can wrap
+            least = [min(max(stiff(shown[r][c], r == 0) for r in range(len(shown))) + 2 * pad + 1, natural[c], room / 2) for c in range(columns)]
+            spare, wanted = room - sum(least), sum(n - m for n, m in zip(natural, least))
+            if spare > 0 and wanted > 0:
+                widths = [m + (n - m) * spare / wanted for n, m in zip(natural, least)]
+            else:
+                widths = [m * room / sum(least) for m in least]
+        sides = {"left": TA_LEFT, "center": TA_CENTER, "right": TA_RIGHT}
+        data = []
+        for r, row in enumerate(source):
+            # a row of short, unmarked cells is drawn as strings: a table of thousands of rows stays light
+            simple = all(marks[r][c] == esc(row[c]) and span(shown[r][c], r == 0) + 2 * pad <= widths[c] + 0.01 for c in range(columns))
+            if simple:
+                data.append(list(shown[r]))
+                continue
+            cells = []
+            for c in range(columns):
+                style = variant(body, fontName=BOLD if r == 0 else FONT, fontSize=size, leading=lead, spaceAfter=0, alignment=sides[block["align"][c]])
+                cells.append(paragraph(row[c], style))
+            data.append(cells)
+        commands = [("FONT", (0, 0), (-1, 0), BOLD, size, lead), ("FONT", (0, 1), (-1, -1), FONT, size, lead),
+                    ("TEXTCOLOR", (0, 0), (-1, -1), ink), ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#ececec")),
+                    ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#b5b5b5")), ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), pad), ("RIGHTPADDING", (0, 0), (-1, -1), pad),
+                    ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3)]
+        for c, side in enumerate(block["align"]):
+            if side != "left":
+                commands.append(("ALIGN", (c, 0), (c, -1), side.upper()))
+        grid = Table(data, colWidths=widths, repeatRows=1 if len(data) > 1 else 0, splitInRow=1, hAlign="LEFT", spaceBefore=4, spaceAfter=10)
+        grid.setStyle(TableStyle(commands))
+        return grid
+
+    def picture(alt, source, room):
+        path = source if os.path.isabs(source) else os.path.join(base, source)
+        try:
+            from PIL import Image as Picture
+
+            with Picture.open(path) as im:
+                if im.format not in ("PNG", "JPEG"):
+                    raise ValueError(im.format)
+                (w, h), dpi = im.size, im.info.get("dpi", (96, 96))[0]
+        except Exception:  # not there, not a picture, or a kind that is not embedded
+            missing.append(source)
+            return paragraph(f"[{alt or 'picture'}: {source}]", variant(body, textColor=grey))
+        dpi = dpi if 50 <= dpi <= 1200 else 96
+        w, h = w * 72 / dpi, h * 72 / dpi
+        scale = min(1, room / w, (height - 24) / h)
+        placed = Image(path, width=w * scale, height=h * scale, hAlign="LEFT")
+        placed.spaceBefore, placed.spaceAfter = 4, 10
+        return placed
+
+    def flow(blocks, indent=0, quoted=False):
+        base_style = variant(body, leftIndent=indent, textColor=grey) if quoted else body
+        room = width - indent
+        for block in blocks:
+            kind = block["type"]
+            if kind == "h" and block["text"]:
+                yield paragraph(block["text"], variant(heads[min(block["level"], 4)], leftIndent=indent))
+            elif kind == "p":
+                alone = PICTURE.match(block["text"])
+                yield picture(alone.group(1), alone.group(2), room) if alone else paragraph(block["text"], base_style)
+            elif kind == "code":
+                yield code(block["text"], room)
+            elif kind == "hr":
+                yield HRFlowable(width="100%", thickness=0.6, color=colors.HexColor("#b5b5b5"), spaceBefore=6, spaceAfter=8)
+            elif kind == "table":
+                yield table(block, room)
+            elif kind == "quote":
+                yield from flow(block["blocks"], indent + 14, True)
+            elif kind == "list":
+                size = base_style.fontSize
+                marks = [item["marker"] or ("•", "◦", "▪")[min(item["level"], 2)] for item in block["items"]]
+                gutter = {}  # per depth: room for the widest number
+                for item, mark in zip(block["items"], marks):
+                    gutter[item["level"]] = max(gutter.get(item["level"], 12), pdfmetrics.stringWidth(mark, FONT, size) + 5)
+                for k, (item, mark) in enumerate(zip(block["items"], marks)):
+                    at = indent + 4 + sum(gutter.get(depth, 12) + 2 for depth in range(item["level"]))
+                    last = k == len(block["items"]) - 1
+                    style = variant(base_style, leftIndent=at + gutter[item["level"]], bulletIndent=at, bulletFontName=FONT,
+                                    bulletFontSize=size, spaceAfter=7 if last else 2)
+                    yield paragraph(item["text"], style, bullet=mark)
+
+    story = list(flow(blocks))
+    if not story:
+        raise Failure("there is nothing to set: the Markdown has no content")
+    pages = []
+
+    class Numbered(canvas.Canvas):
+        """Draws "page / pages" at the foot, which needs the count: pages are kept until the last one is known."""
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.kept = []
+
+        def showPage(self):
+            self.kept.append(dict(self.__dict__))
+            self._startPage()
+
+        def save(self):
+            for state in self.kept:
+                self.__dict__.update(state)
+                self.setFont(FONT, 8)
+                self.setFillColor(grey)
+                self.drawCentredString(page[0] / 2, 9 * mm, f"{self._pageNumber} / {len(self.kept)}")
+                super().showPage()
+            pages.append(len(self.kept))
+            super().save()
+
+    doc = SimpleDocTemplate(out, pagesize=page, leftMargin=margin, rightMargin=margin, topMargin=top, bottomMargin=bottom,
+                            title=title, author="", creator="md2pdf")
+    try:
+        doc.build(story, canvasmaker=Numbered)
+    except LayoutError as err:
+        raise Failure(f"something does not fit on a page: {str(err)[:160]}")
+    return pages[0], missing
+
+
+def main(argv):
+    if len(argv) == 2 and argv[1] in ("-h", "--help"):
+        print(USAGE)
+        return 0
+    parser = Arguments(add_help=False)
+    parser.add_argument("files", nargs="+")
+    parser.add_argument("--title")
+    parser.add_argument("--landscape", action="store_true")
+    parser.add_argument("--dump", action="store_true")
+    try:
+        args = parser.parse_args(argv[1:])
+        if len(args.files) != (1 if args.dump else 2):
+            raise Failure("usage")
+    except Failure:
+        print(USAGE, file=sys.stderr)
+        return 2
+    source = args.files[0]
+    part = ""
+    try:
+        blocks, title = read(source)
+        if args.dump:
+            print(json.dumps(dumped(blocks), ensure_ascii=False, indent=1))
+            return 0
+        out = args.files[1]
+        first = next((plain(inline(b["text"])) for b in blocks if b["type"] == "h" and b["text"]), "")
+        title = args.title or title or first or os.path.splitext(os.path.basename(source))[0]
+        widest = max((len(t["header"]) for t in tables(blocks)), default=0)
+        sideways = args.landscape or widest >= WIDE_TABLE
+        if os.path.dirname(out):
+            os.makedirs(os.path.dirname(out), exist_ok=True)
+        part = out + ".part"  # a failed run leaves no half-written PDF under the name asked for
+        pages, missing = render(blocks, part, title, sideways, os.path.dirname(os.path.abspath(source)))
+        os.replace(part, out)
+    except Failure as err:
+        print(f"md2pdf: {err}", file=sys.stderr)
+        return 1
+    except OSError as err:
+        print(f"md2pdf: {err.filename or source}: {err.strerror or err}", file=sys.stderr)
+        return 1
+    finally:
+        if part and os.path.exists(part):
+            os.remove(part)
+    notes = []
+    if sideways and not args.landscape:
+        notes.append(f"landscape: a table has {widest} columns")
+    if missing:
+        notes.append(f"{len(missing)} {'picture is' if len(missing) == 1 else 'pictures are'} not set, only named: {', '.join(missing[:5])}")
+    size = os.path.getsize(out)
+    print(f"wrote {out}: {pages} {'page' if pages == 1 else 'pages'}, {size} bytes" + "".join(f"; {note}" for note in notes))
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+    sys.exit(main(sys.argv))

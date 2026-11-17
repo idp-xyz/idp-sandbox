@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -112,5 +113,82 @@ officecli validate in/q-member.docx
 officecli view in/q-member.docx text`)
 	if r.ExitCode != 0 || !strings.Contains(r.Stdout, "报价：第二版") {
 		t.Fatalf("%+v", r)
+	}
+}
+
+// PDF and Markdown in the office profile (ADR-0001 D17), under the isolation and the default limits of a run: a member's
+// Markdown comes in, md2pdf sets it as a PDF with Chinese and a table, the PDF goes out as a file the transfer check
+// accepts, and comes back in to be read by pdftext in a later run. A protected file, a page without text and a broken
+// file are told apart.
+func TestPDFAndMarkdownRoundTrip(t *testing.T) {
+	img := os.Getenv("IDP_SANDBOX_OFFICE_IMAGE")
+	if img == "" {
+		t.Skip("IDP_SANDBOX_OFFICE_IMAGE not set (bash deploy/office/build.sh)")
+	}
+	m := setup(t, func(c *sandbox.Config) {
+		c.Languages["office"] = sandbox.OfficeLanguage(img)
+		c.Limits.Timeout, c.Limits.MemoryBytes = 20*time.Second, 256<<20 // what a deployment gives a run by default
+		c.MaxTransferBytes = 6 << 20
+	})
+	id := ws(t, m)
+	ctx := context.Background()
+	md := "# 报价单\n\n含税总价 **1,280.50** 元，明细见下表。\n\n| 渠道 | 重量段 | 价格 |\n|:--|:-:|--:|\n| 空运 | 1 LB | 12.50 |\n| 海运 | 150 LB | 7.25 |\n"
+	if err := files.Check("报价单.md", []byte(md)); err != nil {
+		t.Fatalf("the Markdown is refused: %v", err)
+	}
+	if err := m.PutBytes(ctx, owner, id, "in/报价单.md", []byte(md)); err != nil {
+		t.Fatal(err)
+	}
+	r := run(t, m, id, "office", `md2pdf in/报价单.md out/报价单.pdf && pdftext --check out/报价单.pdf && ls -A /tmp | wc -l`)
+	if r.ExitCode != 0 || !strings.Contains(r.Stdout, "wrote out/报价单.pdf: 1 page") || !strings.Contains(r.Stdout, "\n报价单.pdf: 1 page\n") ||
+		!strings.HasSuffix(strings.TrimSpace(r.Stdout), "0") {
+		t.Fatalf("%+v", r)
+	}
+	pdf, err := m.GetBytes(ctx, owner, id, "out/报价单.pdf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := files.Check("报价单.pdf", pdf); err != nil || len(pdf) < 5000 { // the font's glyphs are in the file
+		t.Fatalf("the exported PDF: %d bytes, %v", len(pdf), err)
+	}
+	// it comes back as a member's attachment, and a later run reads it with each row of the table on one line
+	if err := m.PutBytes(ctx, owner, id, "in/来件.pdf", pdf); err != nil {
+		t.Fatal(err)
+	}
+	r = run(t, m, id, "office", `pdftext in/来件.pdf --layout`)
+	for _, want := range []string{"来件.pdf: 1 page", "--- page 1 ---", "报价单", "含税总价", "1,280.50"} {
+		if !strings.Contains(r.Stdout, want) {
+			t.Fatalf("%q missing: %+v", want, r)
+		}
+	}
+	for _, row := range []string{`空运\s+1 LB\s+12\.50`, `海运\s+150 LB\s+7\.25`} {
+		if !regexp.MustCompile(row).MatchString(r.Stdout) {
+			t.Fatalf("no row %s: %+v", row, r)
+		}
+	}
+	// a file with a password, a page that is only a picture, and a file cut short
+	r = run(t, m, id, "office", `python3 - <<'PY'
+import pypdf
+from PIL import Image as Picture
+from reportlab.platypus import Image, SimpleDocTemplate
+Picture.new("RGB", (400, 150), "white").save("page.png")
+SimpleDocTemplate("scan.pdf").build([Image("page.png", width=300, height=110)])
+w = pypdf.PdfWriter(clone_from="out/报价单.pdf")
+w.encrypt(user_password="s3cret", owner_password="owner", algorithm="AES-256")
+w.write("locked.pdf")
+PY
+pdftext locked.pdf; echo "locked=$?"
+pdftext locked.pdf --password s3cret --max-bytes 400 | head -3
+pdftext scan.pdf
+head -c 2000 out/报价单.pdf > cut.pdf; pdftext --check cut.pdf; echo "cut=$?"`)
+	for _, want := range []string{"locked=1", "locked.pdf: 1 page\n--- page 1 ---\n报价单", "no text on this page: it is a picture (a scan)", "cut=1"} {
+		if !strings.Contains(r.Stdout, want) {
+			t.Fatalf("%q missing: %+v", want, r)
+		}
+	}
+	for _, want := range []string{"locked.pdf is protected by a password; give it with --password", "cut.pdf is not a PDF file that can be read"} {
+		if !strings.Contains(r.Stderr, want) {
+			t.Fatalf("%q missing: %+v", want, r)
+		}
 	}
 }

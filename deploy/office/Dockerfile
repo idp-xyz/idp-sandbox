@@ -1,9 +1,16 @@
 # The office run profile of idp-sandbox (ADR-0001 D14): the python run image with a pinned, checksum-verified officecli.
-# Built by deploy/office/build.sh with --network none; the binary is checked before it reaches this context.
+# Built by deploy/office/build.sh with --network none; every file is checked before it reaches this context.
 ARG BASE=python:3.12-slim
 FROM ${BASE}
 COPY officecli /usr/local/bin/officecli
 COPY sheetskel /usr/local/bin/sheetskel
+# PDF and Markdown (ADR-0001 D17): pypdf reads a PDF (pycryptodome opens an encrypted one), reportlab writes one (it
+# needs Pillow and charset-normalizer), and Noto Sans SC is the font a written PDF embeds for Chinese. The wheels are
+# installed without an index and without resolving anything; pip check fails the build when a requirement is missing.
+RUN --mount=type=bind,source=wheels,target=/wheels \
+    pip install --no-index --no-deps --no-cache-dir --disable-pip-version-check --root-user-action=ignore /wheels/*.whl && pip check
+COPY fonts/ /usr/share/fonts/truetype/noto/
+COPY pdftext md2pdf /usr/local/bin/
 # Runs have no network, a read-only root, HOME=/tmp and a fresh container each time:
 #   no update checks and no installs; no resident process (it would die with the run, unflushed), and when an agent opens
 #   one anyway (officecli open, which its own references recommend) every change is flushed at once; no .NET diagnostics

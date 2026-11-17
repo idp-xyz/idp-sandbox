@@ -22,11 +22,12 @@ type Language struct {
 	Description string
 }
 
-// OfficeLanguage is the office run profile (ADR-0001 D14): a POSIX shell script in the operator's office image, which has
-// officecli on its PATH for .docx, .xlsx and .pptx files in the workspace. Same isolation and limits as any other run.
+// OfficeLanguage is the office run profile (ADR-0001 D14, D17): a POSIX shell script in the operator's office image, which
+// has officecli on its PATH for .docx, .xlsx and .pptx files in the workspace, and pdftext and md2pdf for PDF. Same
+// isolation and limits as any other run.
 func OfficeLanguage(image string) Language {
 	return Language{Image: image, File: "main.sh", Command: func(f string) []string { return []string{"sh", f} },
-		Description: "a POSIX shell script with the officecli command on PATH, for reading, editing and creating .docx, .xlsx and .pptx files in the workspace (officecli help lists the commands). sheetskel FILE.xlsx prints each sheet's name, used range and header row; use it instead of unpacking the workbook"}
+		Description: "a POSIX shell script with the officecli command on PATH, for reading, editing and creating .docx, .xlsx and .pptx files in the workspace (officecli help lists the commands). sheetskel FILE.xlsx prints each sheet's name, used range and header row; use it instead of unpacking the workbook. pdftext FILE.pdf prints a PDF's pages as text, and md2pdf IN.md OUT.pdf writes a PDF from Markdown, Chinese included"}
 }
 
 // Config of the manager.

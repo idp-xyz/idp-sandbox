@@ -1,0 +1,225 @@
+#!/usr/bin/env python3
+"""Print the text of a PDF file page by page, within a size and a time budget.
+
+One look at a PDF inside the office sandbox: how many pages it has and what they say. A page without a text layer (a
+scan) is reported as such; there is no OCR here. Needs pypdf.
+"""
+
+import argparse
+import os
+import re
+import sys
+import time
+
+MAX_BYTES = 12000  # printed unless --max-bytes says otherwise: idp-host hands a model at most 16 KiB of a tool result
+SECONDS = 12       # a sandbox run has a time limit (20 s by default): stop reading before it, and say where
+
+USAGE = """usage: pdftext FILE.pdf [--pages 1-3,7] [--layout] [--max-bytes N] [-o OUT.txt] [--password PW]
+       pdftext --check FILE.pdf
+
+  --pages      the pages to read, for example 3, 2-5, 7- or 1,4,9-12 (default: from page 1)
+  --layout     keep the horizontal position of the text, so that the columns of a table stay apart
+  --max-bytes  how much text to print, in bytes of UTF-8 (default 12000; 0 = no limit)
+  -o OUT       write the text of the pages to OUT instead (no size limit) and print only a summary
+  --password   the password of a protected file
+  --check      only say how many pages the file has; exit 1 when it cannot be opened"""
+
+
+class Failure(Exception):
+    pass
+
+
+class Arguments(argparse.ArgumentParser):
+    def error(self, message):
+        raise Failure("usage")
+
+
+def plural(n, word):
+    return f"1 {word}" if n == 1 else f"{n} {word}s"
+
+
+def parse_pages(spec, count):
+    """The 0-based page numbers that a --pages value names, in the order written."""
+    if not spec or spec == "all":
+        return list(range(count))
+    out = []
+    for part in spec.split(","):
+        m = re.fullmatch(r"\s*(\d*)\s*(-?)\s*(\d*)\s*", part)
+        if not m or not (m.group(1) or m.group(3)):
+            raise Failure(f"--pages {spec}: write pages as 3, 2-5, 7- or 1,4,9-12")
+        first = int(m.group(1)) if m.group(1) else 1
+        last = int(m.group(3)) if m.group(3) else (count if m.group(2) else first)
+        if first < 1 or last < first:
+            raise Failure(f"--pages {spec}: write pages as 3, 2-5, 7- or 1,4,9-12")
+        if first > count:
+            raise Failure(f"there is no page {first}: the file has {plural(count, 'page')}")
+        out.extend(range(first - 1, min(last, count)))
+    return out
+
+
+def spans(numbers):
+    """Page numbers as --pages writes them: [1, 2, 3, 7] -> '1-3,7'."""
+    parts, start, prev = [], None, None
+    for n in list(numbers) + [None]:
+        if start is not None and n == prev + 1:
+            prev = n
+            continue
+        if start is not None:
+            parts.append(str(start) if start == prev else f"{start}-{prev}")
+        start = prev = n
+    return ",".join(parts)
+
+
+def open_pdf(path, password):
+    try:
+        import logging
+
+        import pypdf
+        from pypdf.errors import DependencyError, PyPdfError
+    except ImportError:
+        raise Failure("pdftext needs the pypdf package, which the office image carries")
+    logging.getLogger("pypdf").setLevel(logging.CRITICAL)  # a damaged file is reported once, below
+    if not os.path.isfile(path):
+        raise Failure(f"{path}: no such file")
+    try:
+        reader = pypdf.PdfReader(path, strict=False)
+        if reader.is_encrypted and not reader.decrypt(password or ""):
+            if password:
+                raise Failure(f"{path}: that is not the file's password")
+            raise Failure(f"{path} is protected by a password; give it with --password")
+        count = len(reader.pages)
+    except Failure:
+        raise
+    except DependencyError as err:
+        raise Failure(f"{path} is encrypted in a way this sandbox cannot open ({err})")
+    except (PyPdfError, OSError, ValueError, KeyError, TypeError, AttributeError, RecursionError) as err:
+        raise Failure(f"{path} is not a PDF file that can be read ({type(err).__name__}: {str(err)[:120]})")
+    return reader, count
+
+
+def clean(text):
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = "".join(ch for ch in text if ch in "\n\t" or ch >= " ")
+    text = re.sub(r"\n{3,}", "\n\n", "\n".join(line.rstrip() for line in text.split("\n")))
+    return text.strip("\n")
+
+
+def page_text(page, layout):
+    """The page's text, or '' and why it has none."""
+    try:
+        text = clean(page.extract_text(extraction_mode="layout") if layout else page.extract_text())
+    except Exception as err:  # a damaged page must not hide the others
+        return "", f"this page could not be read: {type(err).__name__}"
+    if text.strip():
+        return text, ""
+    try:
+        scanned = len(page.images) > 0
+    except Exception:
+        scanned = True
+    if scanned:
+        return "", "no text on this page: it is a picture (a scan), and there is no OCR here"
+    return "", "this page is empty"
+
+
+def cut(text, room):
+    """As much of the text as fits in room bytes of UTF-8."""
+    return text.encode("utf-8")[:room].decode("utf-8", "ignore")
+
+
+def main(argv):
+    if len(argv) == 2 and argv[1] in ("-h", "--help"):
+        print(USAGE)
+        return 0
+    parser = Arguments(add_help=False)
+    parser.add_argument("file")
+    parser.add_argument("--pages")
+    parser.add_argument("--layout", action="store_true")
+    parser.add_argument("--max-bytes", type=int, default=MAX_BYTES)
+    parser.add_argument("-o", "--out")
+    parser.add_argument("--password")
+    parser.add_argument("--check", action="store_true")
+    try:
+        args = parser.parse_args(argv[1:])
+        if args.max_bytes < 0:
+            raise Failure("usage")
+    except Failure:
+        print(USAGE, file=sys.stderr)
+        return 2
+    name = os.path.basename(args.file)
+    try:
+        reader, count = open_pdf(args.file, args.password)
+        if args.check:
+            if count < 1:
+                raise Failure(f"{args.file} has no pages")
+            print(f"{name}: {plural(count, 'page')}")
+            return 0
+        pages = parse_pages(args.pages, count)
+    except Failure as err:
+        print(f"pdftext: {err}", file=sys.stderr)
+        return 1
+
+    limit = 0 if args.out else args.max_bytes  # a file takes everything; the screen takes a bounded part
+    started = time.monotonic()
+    chunks, shown, chars, read, without, notes = [], 0, 0, 0, [], []
+    for index in pages:
+        number = index + 1
+        if time.monotonic() - started > SECONDS:
+            rest = spans(p + 1 for p in pages[read:])
+            notes.append(f"stopped before page {number} after {SECONDS} seconds. Next: pdftext {args.file} --pages {rest}")
+            break
+        text, why = page_text(reader.pages[index], args.layout)
+        if not text:
+            without.append(number)
+            chunks.append(f"--- page {number} ---\n({why})")
+            read += 1
+            continue
+        size = len(text.encode("utf-8"))
+        if limit and shown + size > limit:
+            room = limit - shown
+            if room < 400 and chunks:
+                rest = spans(p + 1 for p in pages[read:])
+                notes.append(f"stopped before page {number}: {shown} bytes shown. Next: pdftext {args.file} --pages {rest}")
+                break
+            part = cut(text, room)
+            chunks.append(f"--- page {number} ---\n{part}")
+            shown, chars, read = shown + len(part.encode("utf-8")), chars + len(part), read + 1
+            after = spans(p + 1 for p in pages[read:])
+            note = f"page {number} is cut: {len(part.encode('utf-8'))} of {size} bytes shown. The whole page: pdftext {args.file} --pages {number} -o page{number}.txt"
+            notes.append(note + (f". Next: pdftext {args.file} --pages {after}" if after else ""))
+            break
+        chunks.append(f"--- page {number} ---\n{text}")
+        shown, chars, read = shown + size, chars + len(text), read + 1
+
+    lines = [f"{name}: {plural(count, 'page')}"]
+    body = "\n".join(chunks)
+    if args.out:
+        try:
+            parent = os.path.dirname(args.out)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            with open(args.out, "w", encoding="utf-8") as f:
+                f.write(body + "\n")
+        except OSError as err:
+            print(f"pdftext: {args.out}: {err.strerror or err}", file=sys.stderr)
+            return 1
+        lines.append(f"wrote {args.out}: pages {spans(p + 1 for p in pages[:read]) or 'none'}, {chars} characters")
+    elif body:
+        lines.append(body)
+    lines.extend(f"[{note}]" for note in notes)
+    if without:
+        lines.append(f"[no text on {'page' if len(without) == 1 else 'pages'} {spans(without)}]")
+    if not args.layout:
+        rows = [line for chunk in chunks for line in chunk.split("\n")[1:]]
+        if len(rows) >= 20 and sum(len(row) < 12 for row in rows) >= 0.6 * len(rows):
+            # a table written cell by cell comes out one cell a line; with their positions the rows are whole again
+            lines.append("[most lines are short: if this is a table, --layout keeps each row on one line]")
+    sys.stdout.write("\n".join(lines) + "\n")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+    sys.exit(main(sys.argv))

@@ -8,7 +8,7 @@
 - **只能放在 idp-mcp 网关后面**：服务器自己没有认证，只有网关能到达它的私网才安全。网关负责认证、授权、参数校验和审计，并把调用者转发给它。
 - 在 idp-mcp 里必须以 `identity: forward` 注册（`POST /api/v1/servers`，`"identity":"forward"`，注册后不可改）；否则每个请求都被拒绝（`the request carries no caller identity`）。
 - 工具：`sandbox_create`、`sandbox_run`（`python` / `shell`）、`sandbox_write_file`、`sandbox_read_file`、`sandbox_list_files`、`sandbox_delete`。经网关时带目标名前缀（`sandbox__sandbox_run`）。
-- 工具的 schema 变了（例如启用出口、改限额）→ 网关钉住的目录会漂移，要对服务器重新 `discover`、评审、重新发布 Release。
+- 工具的 schema 变了（例如启用出口、改限额，或升级到 `language` 的说明有变化的版本：ADR-0001 D16、D17 在 `office` 的说明里加了 `sheetskel`、`pdftext`、`md2pdf`）→ 网关钉住的目录会漂移，要对服务器重新 `discover`、评审、重新发布 Release。只换 office 运行镜像不改 schema，不需要这一步。
 
 ## 2. 两种后端
 
@@ -33,7 +33,7 @@
 | `IDP_SANDBOX_MEMORY_MB` `_CPUS` `_PIDS` `_TIMEOUT_S` `_OUTPUT_KB` `_WORKSPACE_MB` | 每次运行的限额 | 256 / 1 / 64 / 20 / 64 / 64 |
 | `IDP_SANDBOX_IDLE_MIN` | 工作区空闲多久回收 | 30（存活上限 4 小时）|
 | `IDP_SANDBOX_PYTHON_IMAGE` / `_SHELL_IMAGE` | 运行镜像（运维选，调用者不能选；由运维拉取，服务不拉）| `python:3.12-slim` / `alpine:3.22` |
-| `IDP_SANDBOX_OFFICE_IMAGE` | office 运行档位的镜像（ADR-0001 D14）：`bash deploy/office/build.sh` 构建（OfficeCLI 版本与 SHA-256 钉在脚本里，离网构建并冒烟）；设了才有 `language: office` | 无（不提供 office）|
+| `IDP_SANDBOX_OFFICE_IMAGE` | office 运行档位的镜像（ADR-0001 D14、D17）：`bash deploy/office/build.sh` 构建（OfficeCLI、读写 PDF 的五个 wheel 与两个字体文件各按 SHA-256 钉在脚本里，下载后校验，离网构建并冒烟；下载的文件留在 `IDP_SANDBOX_CACHE`，默认 `~/.cache/idp-sandbox`，目录填好之后构建不需要网络）；设了才有 `language: office` | 无（不提供 office）|
 | `IDP_SANDBOX_FILES_URL` | Workspace 的内部文件端点（例 `http://workspace:8560/internal/v1/files`）；设了才有 `sandbox_import_file` / `sandbox_export_file`（ADR-0001 D15）。只限 Docker 后端：Kubernetes 后端设了会拒绝启动 | 无（不搬文件）|
 | `IDP_SANDBOX_TRANSFER_MB` | 搬进搬出的单个文件上限，不得大于 `IDP_SANDBOX_WORKSPACE_MB` | 25 |
 | `IDP_SANDBOX_RUNTIME` | Docker：OCI 运行时（`runsc`、`kata`）| 守护进程默认 |
@@ -77,6 +77,8 @@ Kubernetes：`kubectl apply -k deploy/kubernetes`（先把镜像摘要、API 服
 | 运行总是 `timed out` | 代码慢，或在 gVisor 下系统调用密集 | 调大 `_TIMEOUT_S`（上限）；评估运行时的开销 |
 | 运行是 `killed: out of memory` | 内存上限 | 调大 `_MEMORY_MB`；Kata 下写满 `/tmp` 也表现为 OOM |
 | `docker: HTTP 404: No such image` | 运行镜像不在 Docker 守护进程 / 节点上 | 运维拉取或加载（服务绝不拉镜像）|
+| 运行里 `md2pdf: not found`、`pdftext: not found`、`officecli: not found` | 这次运行用的是 `language: shell` 或 `python`；这些命令只在 office 镜像里 | 用 `language: office`（Agent 的 skill 里要写明每次运行都用它）|
+| 构建 office 镜像时 `is not the pinned …: its SHA-256 differs` | 上游换了这个地址上的文件，或缓存目录里的文件坏了 | 核对上游的校验和后再改脚本里的钉；不要跳过校验 |
 | Pod 一直 `ContainerCreating`（Kubernetes）| 运行时问题 | gVisor：用 `kvm` 或 `ptrace` 平台，节点 inotify 上限调到 8192；Kata：Go 运行时 + Cloud Hypervisor，别给 RuntimeClass 加 overhead |
 | gVisor 下内存炸弹只被超时停下，运行的内存 / CPU 上限不生效（Kubernetes）| 节点用 systemd cgroup 驱动而 runsc 没开 `systemd-cgroup`：沙箱跑在 Pod 的 cgroup 之外；节点有 swap 时还有一层：kubelet 只给容器关 swap，而整个沙箱在 pause 容器的 cgroup 里 | `runsc.toml` 的 `[runsc_config]` 加 `systemd-cgroup = "true"`；节点有 swap 就给 Pod 关掉（`kubelet-kubepods.slice` 的 `MemorySwapMax=0`）；kind 上 `tests/kind/gvisor.sh` 都做了 |
 | 网关到沙箱超时 | 网络策略没放行 8570 | 网关与注册服务的出口策略加 8570；沙箱命名空间要带 `idp-mcp/mcp-upstream: "true"` 标签 |
