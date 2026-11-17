@@ -239,7 +239,7 @@ func TestOfficeLanguageFollowsTheOperatorsConfiguration(t *testing.T) {
 	cfg := sandbox.DefaultConfig("py", "sh")
 	cfg.Languages["office"] = sandbox.OfficeLanguage("idp-sandbox-office:dev")
 	enum, desc = langs(cfg)
-	if fmt.Sprint(enum) != "[office python shell]" || !strings.Contains(desc, "office: a POSIX shell script with the officecli command") {
+	if fmt.Sprint(enum) != "[office python shell]" || !strings.Contains(desc, "office: a POSIX shell script with the officecli command") || !strings.Contains(desc, "sheetskel FILE.xlsx") {
 		t.Fatalf("%v %q", enum, desc)
 	}
 	if cfg.Languages["office"].Image != "idp-sandbox-office:dev" || fmt.Sprint(cfg.Languages["office"].Command("main.sh")) != "[sh main.sh]" {

@@ -26,7 +26,7 @@ type Language struct {
 // officecli on its PATH for .docx, .xlsx and .pptx files in the workspace. Same isolation and limits as any other run.
 func OfficeLanguage(image string) Language {
 	return Language{Image: image, File: "main.sh", Command: func(f string) []string { return []string{"sh", f} },
-		Description: "a POSIX shell script with the officecli command on PATH, for reading, editing and creating .docx, .xlsx and .pptx files in the workspace (officecli help lists the commands)"}
+		Description: "a POSIX shell script with the officecli command on PATH, for reading, editing and creating .docx, .xlsx and .pptx files in the workspace (officecli help lists the commands). sheetskel FILE.xlsx prints each sheet's name, used range and header row; use it instead of unpacking the workbook"}
 }
 
 // Config of the manager.

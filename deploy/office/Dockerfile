@@ -3,6 +3,7 @@
 ARG BASE=python:3.12-slim
 FROM ${BASE}
 COPY officecli /usr/local/bin/officecli
+COPY sheetskel /usr/local/bin/sheetskel
 # Runs have no network, a read-only root, HOME=/tmp and a fresh container each time:
 #   no update checks and no installs; no resident process (it would die with the run, unflushed), and when an agent opens
 #   one anyway (officecli open, which its own references recommend) every change is flushed at once; no .NET diagnostics

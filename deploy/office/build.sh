@@ -32,8 +32,12 @@ umask 022
 rm -rf "$OUT" && mkdir -p "$OUT"
 cp deploy/office/Dockerfile "$OUT/"
 install -m 0755 "$BIN" "$OUT/officecli"
+install -m 0755 deploy/office/sheetskel "$OUT/sheetskel"
 docker build --network none -q --build-arg "BASE=$BASE" -t "$TAG" "$OUT" >/dev/null
 got="$(docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --user 65534:65534 \
   --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m -e HOME=/tmp "$TAG" officecli --version)"
 [[ "$got" == "$VERSION" ]] || { echo "office: the image answers '$got', not $VERSION" >&2; exit 1; }
+help="$(docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --user 65534:65534 \
+  --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m -e HOME=/tmp "$TAG" sheetskel --help)"
+[[ "$help" == *"FILE.xlsx"* ]] || { echo "office: sheetskel --help answered '$help'" >&2; exit 1; }
 echo "OK: $TAG $(docker image inspect --format '{{.Id}}' "$TAG" | cut -c1-19)… officecli $VERSION sha256 ${SHA256:0:12}…"

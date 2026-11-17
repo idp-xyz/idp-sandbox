@@ -1,0 +1,194 @@
+#!/usr/bin/env python3
+"""Print a compact skeleton of an .xlsx file: each sheet's name, used range, header and next row.
+
+Standard library only. One look at a workbook inside the office sandbox, instead of unpacking it.
+"""
+
+import sys
+import zipfile
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+MAX_SHEETS = 40
+MAX_COLS = 16
+MAX_CELL = 24
+MAX_OUT = 6000
+
+
+def local(tag):
+    return tag.rsplit("}", 1)[-1]
+
+
+def attr(el, name):
+    for key, value in el.attrib.items():
+        if local(key) == name:
+            return value
+    return ""
+
+
+def texts(el, name):
+    out = []
+    for node in el.iter():
+        if local(node.tag) == name and node.text:
+            out.append(node.text)
+    return "".join(out)
+
+
+def col_index(ref):
+    n = 0
+    for ch in ref:
+        if not ch.isalpha():
+            break
+        n = n * 26 + ord(ch.upper()) - 64
+    return n
+
+
+def row_index(ref):
+    digits = "".join(ch for ch in ref if ch.isdigit())
+    return int(digits) if digits else 0
+
+
+def clip(value):
+    value = " ".join(value.split())
+    chars = list(value)
+    if len(chars) <= MAX_CELL:
+        return value
+    return "".join(chars[: MAX_CELL - 1]) + "…"
+
+
+def shared_strings(zf):
+    try:
+        root = ET.fromstring(zf.read("xl/sharedStrings.xml"))
+    except (KeyError, ET.ParseError):
+        return []
+    return [texts(si, "t") for si in root if local(si.tag) == "si"]
+
+
+def cell_value(cell, strings):
+    kind = attr(cell, "t")
+    if kind == "inlineStr":
+        return texts(cell, "t")
+    raw = ""
+    for node in cell:
+        if local(node.tag) == "v" and node.text:
+            raw = node.text
+            break
+    if kind == "s":
+        try:
+            return strings[int(raw)]
+        except (ValueError, IndexError):
+            return ""
+    if kind == "b":
+        return "TRUE" if raw == "1" else "FALSE"
+    return raw
+
+
+def row_cells(row, strings):
+    cells = []
+    for cell in row:
+        if local(cell.tag) != "c":
+            continue
+        cells.append((col_index(attr(cell, "r")), cell_value(cell, strings)))
+    cells.sort(key=lambda item: item[0])
+    return [clip(value) for _, value in cells]
+
+
+def sheet_size(root, nrows):
+    ref = ""
+    for node in root:
+        if local(node.tag) == "dimension":
+            ref = attr(node, "ref")
+            break
+    if ":" not in ref:
+        return ref or "-", nrows, 0
+    start, end = ref.split(":", 1)
+    rows = max(row_index(end) - row_index(start) + 1, 0)
+    cols = max(col_index(end) - col_index(start) + 1, 0)
+    return ref, rows, cols
+
+
+def locate(target):
+    target = target.lstrip("/")
+    if not target.startswith("xl/"):
+        target = "xl/" + target
+    return target
+
+
+def sheets(zf):
+    root = ET.fromstring(zf.read("xl/workbook.xml"))
+    rels = ET.fromstring(zf.read("xl/_rels/workbook.xml.rels"))
+    targets = {attr(rel, "Id"): locate(attr(rel, "Target")) for rel in rels}
+    found = []
+    for node in root.iter():
+        if local(node.tag) != "sheet":
+            continue
+        found.append((attr(node, "name") or "(unnamed)", targets.get(attr(node, "id"), "")))
+    return found
+
+
+def counted(n, word):
+    if n == 1:
+        return f"1 {word}"
+    return f"{n} {word}s"
+
+
+def line_of(cells):
+    if not cells or not any(cells):
+        return ""
+    extra = ""
+    if len(cells) > MAX_COLS:
+        extra = " | …"
+        cells = cells[:MAX_COLS]
+    return " | ".join(cells) + extra
+
+
+def skeleton(path):
+    strings = shared_strings(path_zip := zipfile.ZipFile(path))
+    lines = [Path(path).name]
+    listed = sheets(path_zip)
+    shown = listed[:MAX_SHEETS]
+    for i, (name, target) in enumerate(shown, start=1):
+        try:
+            root = ET.fromstring(path_zip.read(target))
+        except (KeyError, ET.ParseError):
+            lines.append(f"{i}. {name}  (unreadable)")
+            continue
+        data = next((node for node in root if local(node.tag) == "sheetData"), None)
+        rows = [row for row in (data or []) if local(row.tag) == "row"]
+        ref, nrows, ncols = sheet_size(root, len(rows))
+        if ncols == 0 and rows:
+            ncols = max((len(row_cells(row, strings)) for row in rows[:2]), default=0)
+        header = line_of(row_cells(rows[0], strings)) if rows else ""
+        nxt = line_of(row_cells(rows[1], strings)) if len(rows) > 1 else ""
+        lines.append(f"{i}. {name}  {ref}  {counted(nrows, 'row')}, {counted(ncols, 'column')}")
+        if header:
+            lines.append("   header: " + header)
+        if nxt:
+            lines.append("   next: " + nxt)
+    if len(listed) > MAX_SHEETS:
+        lines.append(f"… {len(listed) - MAX_SHEETS} more sheets")
+    path_zip.close()
+    text = "\n".join(lines)
+    if len(text) > MAX_OUT:
+        text = text[:MAX_OUT].rsplit("\n", 1)[0] + "\n…"
+    return text
+
+
+def main(argv):
+    if len(argv) == 2 and argv[1] in ("-h", "--help"):
+        print("usage: sheetskel FILE.xlsx")
+        return 0
+    if len(argv) != 2:
+        print("usage: sheetskel FILE.xlsx", file=sys.stderr)
+        return 2
+    path = argv[1]
+    try:
+        print(skeleton(path))
+    except (zipfile.BadZipFile, OSError, ET.ParseError, KeyError) as err:
+        print(f"sheetskel: {path}: {err}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
