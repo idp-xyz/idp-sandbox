@@ -15,6 +15,13 @@ command -v crane >/dev/null || GOBIN="$BIN" go install github.com/google/go-cont
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
 docker image inspect "$NODE" >/dev/null 2>&1 || { crane pull --format=tarball "$NODE" "$T/node.tar" && docker load -i "$T/node.tar" >/dev/null; }
 kind get clusters 2>/dev/null | grep -qx kind || kind create cluster --name kind --config tests/kind/kind.yaml --image "$NODE" --wait 0s
+# Docker hands out addresses on the kind network anew at every start; pin the node's, which NetworkPolicies name as the API server's
+N=kind-control-plane
+if [[ -z "$(docker inspect $N -f '{{with .NetworkSettings.Networks.kind.IPAMConfig}}{{.IPv4Address}}{{end}}')" ]]; then
+  IP="$(docker inspect $N -f '{{.NetworkSettings.Networks.kind.IPAddress}}')"
+  docker stop $N >/dev/null && docker network disconnect kind $N && docker network connect --ip "$IP" kind $N && docker start $N >/dev/null
+  for _ in $(seq 120); do kubectl get --raw /readyz >/dev/null 2>&1 && break; sleep 1; done
+fi
 for i in cni node kube-controllers; do crane pull "quay.io/calico/$i:$CALICO" "$T/$i.tar" && kind load image-archive "$T/$i.tar" --name kind >/dev/null; done
 curl -s "https://raw.githubusercontent.com/projectcalico/calico/$CALICO/manifests/calico.yaml" | sed 's#docker.io/calico/#quay.io/calico/#' | kubectl apply -f - >/dev/null
 kubectl -n kube-system rollout status ds/calico-node --timeout=300s
