@@ -206,9 +206,17 @@ func (m *Manager) Delete(ctx context.Context, owner, id string) error {
 	return m.be.DeleteWorkspace(ctx, m.cfg.Namespace+id)
 }
 
+// Network is what a run may reach: nothing, or with Egress the hosts the operator allow-listed for the caller's Tenant
+// (ADR-0001 D13, D21). The tenant is said apart from the owner because an owner is "tenant/subject" and either part may
+// hold a slash.
+type Network struct {
+	Egress bool
+	Tenant string
+}
+
 // Run executes code in the workspace. timeout 0 means the default; it is capped at the configured one.
-func (m *Manager) Run(ctx context.Context, owner, id, language, code string, timeout time.Duration, egress bool) (RunResult, error) {
-	if egress && !m.cfg.EgressEnabled {
+func (m *Manager) Run(ctx context.Context, owner, id, language, code string, timeout time.Duration, network Network) (RunResult, error) {
+	if network.Egress && !m.cfg.EgressEnabled {
 		return RunResult{}, ErrNoEgress
 	}
 	lang, ok := m.cfg.Languages[language]
@@ -237,7 +245,7 @@ func (m *Manager) Run(ctx context.Context, owner, id, language, code string, tim
 		return RunResult{}, err
 	}
 	res, err := m.be.Run(ctx, RunSpec{Workspace: name, Image: lang.Image, Cmd: lang.Command("/work/" + file),
-		Limits: m.cfg.Limits, Timeout: timeout, Egress: egress})
+		Limits: m.cfg.Limits, Timeout: timeout, Egress: network.Egress, Tenant: network.Tenant})
 	return res, err
 }
 

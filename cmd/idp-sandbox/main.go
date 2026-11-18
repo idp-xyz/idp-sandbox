@@ -15,6 +15,9 @@
 //	IDP_SANDBOX_MEMORY_MB IDP_SANDBOX_CPUS IDP_SANDBOX_PIDS IDP_SANDBOX_TIMEOUT_S IDP_SANDBOX_OUTPUT_KB
 //	IDP_SANDBOX_EGRESS_PROXY    name of the running idp-sandbox-egress container; enables network=egress for runs (default off)
 //	IDP_SANDBOX_EGRESS_PORT     its port (default 3128)
+//	IDP_SANDBOX_EGRESS_KEY_FILE the key shared with the proxy (its IDP_EGRESS_KEY_FILE): a run's proxy URL then carries a
+//	                           credential that says the caller's tenant, and the proxy applies that tenant's allow-list
+//	                           (ADR-0001 D21). The tenant is the forwarded caller's, so verify it (IDP_SANDBOX_CALLER_KEYS_FILE)
 //	IDP_SANDBOX_REQUIRE_CALLER  default true: a request must carry the caller the gateway forwards (register the
 //	                           server in idp-mcp with identity=forward); false only for a standalone development run
 //	IDP_SANDBOX_CALLER_KEYS_FILE  PEM public key(s) of the gateway (P-256): every tools/call must then carry the gateway's
@@ -46,6 +49,7 @@ import (
 	"syscall"
 	"time"
 
+	"idp-sandbox/internal/egress"
 	"idp-sandbox/internal/engine"
 	"idp-sandbox/internal/files"
 	"idp-sandbox/internal/mcp"
@@ -147,6 +151,17 @@ func main() {
 		if proxy := os.Getenv("IDP_SANDBOX_EGRESS_PROXY"); proxy != "" {
 			eng.EgressProxy, eng.EgressPort = proxy, int(envInt("IDP_SANDBOX_EGRESS_PORT", 3128))
 			cfg.EgressEnabled = true
+			if f := os.Getenv("IDP_SANDBOX_EGRESS_KEY_FILE"); f != "" {
+				key, err := egress.LoadKey(f)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, "IDP_SANDBOX_EGRESS_KEY_FILE:", err)
+					os.Exit(2)
+				}
+				eng.EgressKey = key
+			}
+		} else if os.Getenv("IDP_SANDBOX_EGRESS_KEY_FILE") != "" {
+			fmt.Fprintln(os.Stderr, "IDP_SANDBOX_EGRESS_KEY_FILE is set without IDP_SANDBOX_EGRESS_PROXY")
+			os.Exit(2)
 		}
 		be = eng
 	case "kubernetes":

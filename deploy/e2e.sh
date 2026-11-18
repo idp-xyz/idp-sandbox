@@ -23,7 +23,9 @@ sed -i '/^IDP_GATEWAY_ID=/d; /^IDP_GATEWAY_TOKEN=/d; /^IDP_CALLER_KEYS=/d' "$ENV
 KEYS="$SBX/.local/caller-keys"; mkdir -p "$KEYS"
 openssl ecparam -name prime256v1 -genkey -noout -out "$KEYS/gateway.key" 2>/dev/null
 openssl ec -in "$KEYS/gateway.key" -pubout -out "$KEYS/gateway.pub" 2>/dev/null
-chmod 755 "$KEYS"; chmod 644 "$KEYS/gateway.key" "$KEYS/gateway.pub"
+# the key the sandbox and its egress proxy share (D21): used with --profile egress, made every time so the mount has a source
+openssl rand -hex 32 > "$KEYS/egress.key"
+chmod 755 "$KEYS"; chmod 644 "$KEYS/gateway.key" "$KEYS/gateway.pub" "$KEYS/egress.key"
 echo "IDP_CALLER_KEYS=$KEYS" >> "$ENVF"
 set -a; source "$ENVF"; set +a
 export IDP_IMAGE="${IDP_IMAGE:-idp-mcp:dev}" IDP_SANDBOX_IMAGE="${IDP_SANDBOX_IMAGE:-idp-sandbox:dev}"

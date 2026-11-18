@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -20,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"idp-sandbox/internal/egress"
 	"idp-sandbox/internal/sandbox"
 )
 
@@ -45,6 +47,10 @@ type Engine struct {
 	// port. A run that asks for egress gets its own internal network with the proxy attached and nothing else.
 	EgressProxy string
 	EgressPort  int
+	// EgressKey is shared with the proxy (its IDP_EGRESS_KEY_FILE). With it a run's proxy URL carries a credential that
+	// says the run's tenant, good on that run's network until its time is up; the proxy then applies the tenant's
+	// allow-list and refuses a request without one (ADR-0001 D21).
+	EgressKey []byte
 }
 
 // New connects to host: "unix:///var/run/docker.sock" or "tcp://127.0.0.1:2375".
@@ -300,6 +306,19 @@ func (e *Engine) Run(ctx context.Context, spec sandbox.RunSpec) (sandbox.RunResu
 		// the proxy's address on this run's network, by IP: gVisor's own network stack does not apply Docker's
 		// embedded-DNS rewrite, so a container name may not resolve inside a sandbox
 		proxy := fmt.Sprintf("http://%s:%d", net.proxyIP, e.EgressPort)
+		if len(e.EgressKey) > 0 {
+			life := spec.Timeout
+			if life <= 0 {
+				life = lim.Timeout
+			}
+			ws := sha256.Sum256([]byte(spec.Workspace))
+			cred, err := egress.Mint(e.EgressKey, egress.Claims{Tenant: spec.Tenant, Proxy: net.proxyIP,
+				Expires: time.Now().Add(life + credentialSlack).Unix(), Workspace: hex.EncodeToString(ws[:4])})
+			if err != nil {
+				return sandbox.RunResult{}, fmt.Errorf("egress credential: %w", err)
+			}
+			proxy = fmt.Sprintf("http://%s:%s@%s:%d", egress.User, cred, net.proxyIP, e.EgressPort)
+		}
 		env = append(env, "HTTP_PROXY="+proxy, "HTTPS_PROXY="+proxy, "http_proxy="+proxy, "https_proxy="+proxy)
 	}
 	cfg := map[string]any{
@@ -549,6 +568,10 @@ func (b *bufConn) CloseWrite() error {
 	}
 	return nil
 }
+
+// credentialSlack is how much longer than the run's timeout its egress credential lasts: the container is created and
+// started inside it.
+const credentialSlack = 60 * time.Second
 
 // runNet is a run's own internal network: no route out, only the egress proxy attached. Per run, so that
 // concurrent runs of different callers cannot reach each other (an internal network has no gateway, and a

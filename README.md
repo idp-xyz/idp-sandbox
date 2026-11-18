@@ -10,7 +10,7 @@ IDP TELOS 的 Agent 执行沙箱：一个 MCP 服务器，让 Agent 在隔离的
 
 | 约束 | 做法 |
 |---|---|
-| 网络 | 默认无（`NetworkMode none`，只有回环）。运维配置了 `idp-sandbox-egress` 时可选 `network: egress`：运行得到自己的内部网络，只连着按主机名白名单放行的代理（拒绝回环、私网、云元数据，防 DNS 重绑定），见 ADR D13 |
+| 网络 | 默认无（`NetworkMode none`，只有回环）。运维配置了 `idp-sandbox-egress` 时可选 `network: egress`：运行得到自己的内部网络，只连着按主机名白名单放行的代理（拒绝回环、私网、云元数据，防 DNS 重绑定），见 ADR D13。白名单可以按租户分：服务给每次运行签一个说明调用者租户的代理凭据，代理按它选名单（`IDP_SANDBOX_EGRESS_KEY_FILE`、`IDP_EGRESS_KEY_FILE`、`IDP_EGRESS_TENANTS_FILE`，ADR D21） |
 | 文件系统 | 根文件系统只读；`/tmp` 与工作区是有大小上限的 tmpfs（内核执行配额） |
 | 权限 | 用户 65534；丢弃全部 capabilities；`no-new-privileges`；默认 seccomp；非特权；私有 IPC；`init` |
 | 资源 | 内存（含交换）、CPU、进程数、`nofile`、`fsize`、单次运行时间、输出大小（超限即终止并标记截断） |

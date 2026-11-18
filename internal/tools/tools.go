@@ -158,7 +158,8 @@ func NewWithFiles(m *sandbox.Manager, log *slog.Logger, met Metrics, fc *files.C
 					return failure(fmt.Errorf("%w: network must be none or egress", sandbox.ErrInvalid)), detail
 				}
 				detail += " network=" + map[bool]string{false: "none", true: "egress"}[in.Network == "egress"]
-				res, err := m.Run(ctx, owner, in.WorkspaceID, in.Language, in.Code, time.Duration(in.TimeoutSeconds)*time.Second, in.Network == "egress")
+				res, err := m.Run(ctx, owner, in.WorkspaceID, in.Language, in.Code, time.Duration(in.TimeoutSeconds)*time.Second,
+					sandbox.Network{Egress: in.Network == "egress", Tenant: mcp.CallerOf(ctx).Tenant})
 				if err != nil {
 					a.log.Warn("run", "err", err)
 					return failure(err), detail

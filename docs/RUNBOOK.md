@@ -43,9 +43,29 @@
 | `IDP_SANDBOX_RUNTIME` | Docker：OCI 运行时（`runsc`、`kata`）| 守护进程默认 |
 | `IDP_SANDBOX_RUNTIME_CLASS` | Kubernetes：RuntimeClass | 无 |
 | `IDP_SANDBOX_EGRESS_PROXY` / `_EGRESS_PORT` | 出口代理容器名与端口；设了才有 `network: egress` | 关 |
+| `IDP_SANDBOX_EGRESS_KEY_FILE` | 与出口代理共用的密钥文件（至少 32 字节，如 `openssl rand -hex 32`）；设了之后每次运行的代理地址里带着说明调用者租户的凭据（ADR-0001 D21） | 不设：所有运行用同一张白名单 |
 | `IDP_SANDBOX_NAMESPACE` / `_STORAGE_CLASS` / `_OWNER` | Kubernetes 后端的命名空间、存储类、清扫标签 | Pod 自己的命名空间 / 集群默认 / `default` |
 
 出口代理（`idp-sandbox-egress`）：`IDP_EGRESS_HOSTS`（精确名或 `*.后缀`，空 = 全部拒绝）、`IDP_EGRESS_PORTS`（默认 443、80）。它自己解析并拒绝回环、私网、链路本地、云元数据，不要开 `IDP_EGRESS_ALLOW_PRIVATE`（仅测试）。白名单里不要放允许上传的主机。
+
+**按租户的白名单（ADR-0001 D21）**：代理设 `IDP_EGRESS_KEY_FILE`（与服务的 `IDP_SANDBOX_EGRESS_KEY_FILE` 是同一个文件）和 `IDP_EGRESS_TENANTS_FILE`：
+
+```yaml
+default:                      # 没列出的租户；不写 default 就用 IDP_EGRESS_HOSTS / IDP_EGRESS_PORTS
+  hosts: [pypi.org, files.pythonhosted.org]
+tenants:
+  7b0c0a52-…:                 # 网关转发来的租户 id
+    hosts: [pypi.org, "*.acme.example"]
+    ports: [443]
+  globex:
+    hosts: []                 # 什么都到不了
+```
+
+- 列出的租户只用自己的名单，不叠加 `default`；端口不写就是 443 和 80。
+- 改了文件要重启代理。启动日志里的 `credentialRequired` 与 `tenantsWithTheirOwnList` 说明它读到了什么；每条 `egress` 日志带 `tenant` 与工作区短哈希。
+- 两边要一起配：代理有密钥而服务没有，所有出口请求都是 407；服务有密钥而代理没有，代理不看凭据，所有租户仍用同一张名单。只配了租户文件没配密钥，代理不启动。
+- 租户取自网关转发的调用者，所以应同时配 `IDP_SANDBOX_CALLER_KEYS_FILE`（D18），否则租户可以被伪造。
+- 轮换密钥：两边换成新文件后先重启代理、再重启服务；中间那一小段时间里新的出口运行会得到 407。
 
 ## 4. 部署与检查
 
@@ -80,6 +100,8 @@ Kubernetes：`kubectl apply -k deploy/kubernetes`（先把镜像摘要、API 服
 | `the sandbox is at capacity` | 并发或总数上限 | 稍后重试；调大 `_MAX_CONCURRENT` / `_MAX_WORKSPACES` |
 | `you already hold the maximum number of workspaces` | 每个调用者的上限 | `sandbox_delete` 一个 |
 | `network access is not enabled` | 没配出口代理 | 配代理并重新发布 Release（schema 会变）|
+| 出口请求全是 407 | 代理有 `IDP_EGRESS_KEY_FILE`，服务没有 `IDP_SANDBOX_EGRESS_KEY_FILE`，或两边的密钥不是同一个；也可能是代码自己拼了不带凭据的代理地址 | 两边用同一个密钥文件；代码用环境里的 `HTTP_PROXY` / `HTTPS_PROXY` |
+| 某个租户到不了默认名单里的主机 | 它在 `IDP_EGRESS_TENANTS_FILE` 里被列出：列出的租户只用自己的名单 | 把需要的主机加进它自己的名单 |
 | 运行总是 `timed out` | 代码慢，或在 gVisor 下系统调用密集 | 调大 `_TIMEOUT_S`（上限）；评估运行时的开销 |
 | 运行是 `killed: out of memory` | 内存上限 | 调大 `_MEMORY_MB`；Kata 下写满 `/tmp` 也表现为 OOM |
 | `docker: HTTP 404: No such image` | 运行镜像不在 Docker 守护进程 / 节点上 | 运维拉取或加载（服务绝不拉镜像）|
@@ -97,5 +119,5 @@ Kubernetes：`kubectl apply -k deploy/kubernetes`（先把镜像摘要、API 服
 - 默认运行时（runc）与宿主共享内核：对真正不可信的代码，上 gVisor 或 Kata，并保留全部其他层（无网络、限额、非 root、无令牌、按调用者隔离）。
 - 身份这一跳的签名要配置：给网关一把 P-256 私钥（`IDP_GATEWAY_CALLER_KEY_FILE`），把公钥给沙箱（`IDP_SANDBOX_CALLER_KEYS_FILE`），并告诉沙箱它在 idp-mcp 里登记的端点（`IDP_SANDBOX_CALLER_AUDIENCE`，要与登记的 URL 逐字相同）。生成：`openssl ecparam -name prime256v1 -genkey -noout -out caller.key && openssl ec -in caller.key -pubout -out caller.pub`。换钥匙时先把新公钥追加进沙箱的文件并重启沙箱，再换网关的私钥，最后删掉旧公钥。没配时，只有网关能到达沙箱的网络策略就是边界，不要把 8570 暴露给别人；配了也保留这条网络策略。
 - Docker 后端要 Docker 套接字：专用节点、虚拟机或 rootless 引擎，不要和别的服务共用。
-- 出口白名单对所有调用者一样，按主机名；能上传的主机会成为外传通道。
+- 出口白名单按主机名，可以按租户分（D21），不按人或角色分；能上传的主机会成为外传通道。
 - 加固运行时的实测数据和限制见 ADR 第 5 节。

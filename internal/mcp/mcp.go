@@ -88,8 +88,11 @@ func (c Caller) Owner() string {
 type callerKey struct{}
 
 // CallerFrom returns the caller of a tool request (zero value if none was forwarded).
-func CallerFrom(r *http.Request) Caller {
-	c, _ := r.Context().Value(callerKey{}).(Caller)
+func CallerFrom(r *http.Request) Caller { return CallerOf(r.Context()) }
+
+// CallerOf is CallerFrom for a tool that has the request's context.
+func CallerOf(ctx context.Context) Caller {
+	c, _ := ctx.Value(callerKey{}).(Caller)
 	return c
 }
 

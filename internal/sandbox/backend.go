@@ -30,8 +30,10 @@ type RunSpec struct {
 	// RawOutput reads stdout and stderr from the attach stream instead of the container's log: byte for byte, whatever the
 	// content and size (a log driver re-encodes and rotates). File reads use it (ADR-0001 D15).
 	RawOutput bool
-	// Egress gives the run a path to the operator's allow-listed proxy and nothing else (ADR-0001 D12).
+	// Egress gives the run a path to the operator's allow-listed proxy and nothing else (ADR-0001 D13).
 	Egress bool
+	// Tenant is the caller's tenant: the proxy applies that tenant's allow-list when the operator keeps one per tenant (D21).
+	Tenant string
 }
 
 // RunResult is what a run left behind.

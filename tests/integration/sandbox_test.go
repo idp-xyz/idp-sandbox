@@ -75,7 +75,7 @@ func ws(t *testing.T, m *sandbox.Manager) string {
 
 func run(t *testing.T, m *sandbox.Manager, id, lang, code string) sandbox.RunResult {
 	t.Helper()
-	res, err := m.Run(context.Background(), owner, id, lang, code, 0, false)
+	res, err := m.Run(context.Background(), owner, id, lang, code, 0, sandbox.Network{})
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -218,7 +218,7 @@ func TestInfiniteLoopTimesOut(t *testing.T) {
 		t.Fatalf("%+v after %s", r, time.Since(start))
 	}
 	// a caller can only shorten the timeout
-	res, err := m.Run(context.Background(), owner, id, "python", "import time; time.sleep(60)", time.Hour, false)
+	res, err := m.Run(context.Background(), owner, id, "python", "import time; time.sleep(60)", time.Hour, sandbox.Network{})
 	if err != nil || !res.TimedOut {
 		t.Fatalf("%+v %v", res, err)
 	}
@@ -297,9 +297,12 @@ func TestOneRunAtATimeAndCapacity(t *testing.T) {
 	m := setup(t, func(c *sandbox.Config) { c.MaxWorkspaces = 2 })
 	id := ws(t, m)
 	done := make(chan struct{})
-	go func() { _, _ = m.Run(context.Background(), owner, id, "shell", "sleep 3", 0, false); close(done) }()
+	go func() {
+		_, _ = m.Run(context.Background(), owner, id, "shell", "sleep 3", 0, sandbox.Network{})
+		close(done)
+	}()
 	time.Sleep(1500 * time.Millisecond)
-	if _, err := m.Run(context.Background(), owner, id, "shell", "echo x", 0, false); err != sandbox.ErrBusy {
+	if _, err := m.Run(context.Background(), owner, id, "shell", "echo x", 0, sandbox.Network{}); err != sandbox.ErrBusy {
 		t.Errorf("a second run in a busy workspace: %v", err)
 	}
 	<-done
@@ -329,13 +332,13 @@ func TestDeleteAndReap(t *testing.T) {
 func TestInvalidRequestsAreRefused(t *testing.T) {
 	m := setup(t, nil)
 	id := ws(t, m)
-	if _, err := m.Run(context.Background(), owner, id, "ruby", "puts 1", 0, false); err == nil {
+	if _, err := m.Run(context.Background(), owner, id, "ruby", "puts 1", 0, sandbox.Network{}); err == nil {
 		t.Error("an unlisted language ran")
 	}
-	if _, err := m.Run(context.Background(), owner, id, "python", "", 0, false); err == nil {
+	if _, err := m.Run(context.Background(), owner, id, "python", "", 0, sandbox.Network{}); err == nil {
 		t.Error("empty code ran")
 	}
-	if _, err := m.Run(context.Background(), owner, id, "python", strings.Repeat("#", 300<<10), 0, false); err == nil {
+	if _, err := m.Run(context.Background(), owner, id, "python", strings.Repeat("#", 300<<10), 0, sandbox.Network{}); err == nil {
 		t.Error("oversized code ran")
 	}
 	if err := m.WriteFile(context.Background(), owner, id, "big", make([]byte, 2<<20)); err != sandbox.ErrFileTooLarge {
@@ -349,7 +352,7 @@ func TestAWorkspaceBelongsToItsCaller(t *testing.T) {
 	run(t, m, id, "shell", "echo mine > f")
 	bob := "acme/bob"
 	ctx := context.Background()
-	if _, err := m.Run(ctx, bob, id, "shell", "cat f", 0, false); err != sandbox.ErrNotFound {
+	if _, err := m.Run(ctx, bob, id, "shell", "cat f", 0, sandbox.Network{}); err != sandbox.ErrNotFound {
 		t.Errorf("another caller ran in the workspace: %v", err)
 	}
 	if _, err := m.ReadFile(ctx, bob, id, "f"); err != sandbox.ErrNotFound {

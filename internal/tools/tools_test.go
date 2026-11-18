@@ -19,6 +19,7 @@ import (
 type fake struct {
 	files map[string][]byte
 	fail  error
+	ran   sandbox.RunSpec // the last run
 }
 
 func (f *fake) Ping(context.Context) error                           { return nil }
@@ -39,6 +40,7 @@ func (f *fake) ReadFile(_ context.Context, ws, p string, _ int64) ([]byte, error
 	return nil, sandbox.ErrNoFile
 }
 func (f *fake) Run(_ context.Context, s sandbox.RunSpec) (sandbox.RunResult, error) {
+	f.ran = s
 	return sandbox.RunResult{ExitCode: 0, Stdout: "out \xff", Stderr: "err", Duration: time.Millisecond}, f.fail
 }
 
@@ -245,5 +247,33 @@ func TestOfficeLanguageFollowsTheOperatorsConfiguration(t *testing.T) {
 	}
 	if cfg.Languages["office"].Image != "idp-sandbox-office:dev" || fmt.Sprint(cfg.Languages["office"].Command("main.sh")) != "[sh main.sh]" {
 		t.Fatalf("%+v", cfg.Languages["office"])
+	}
+}
+
+// A run that asks for the network carries the caller's tenant to the backend, which makes the proxy credential from it: the
+// proxy then applies that tenant's allow-list (ADR-0001 D21). The tenant is the forwarded caller's, not an argument.
+func TestARunCarriesTheCallersTenant(t *testing.T) {
+	f := &fake{files: map[string][]byte{}}
+	cfg := sandbox.DefaultConfig("py", "sh")
+	cfg.EgressEnabled = true
+	m, err := sandbox.New(context.Background(), cfg, f, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(mcp.New("t", "1", "", New(m, slog.New(slog.DiscardHandler), nometrics{})))
+	defer ts.Close()
+	id := callAs(t, ts, "bob", "sandbox_create", nil)["structuredContent"].(map[string]any)["workspaceId"].(string)
+	r := callAs(t, ts, "bob", "sandbox_run", map[string]any{"workspaceId": id, "language": "python", "code": "x", "network": "egress"})
+	if r["isError"] != nil || !f.ran.Egress || f.ran.Tenant != "acme" {
+		t.Fatalf("%v: egress %v for tenant %q", r, f.ran.Egress, f.ran.Tenant)
+	}
+	f.ran = sandbox.RunSpec{}
+	r = callAs(t, ts, "bob", "sandbox_run", map[string]any{"workspaceId": id, "language": "python", "code": "x", "network": "egress", "tenant": "globex"})
+	if r["isError"] != true || f.ran.Egress {
+		t.Fatalf("a run that names a tenant itself was taken: %v", r)
+	}
+	r = callAs(t, ts, "bob", "sandbox_run", map[string]any{"workspaceId": id, "language": "python", "code": "x"})
+	if r["isError"] != nil || f.ran.Egress {
+		t.Fatalf("%v: a run that did not ask got the network", r)
 	}
 }

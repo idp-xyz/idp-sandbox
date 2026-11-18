@@ -1,5 +1,6 @@
 // Package egress is the sandbox's allow-listed HTTP(S) forward proxy: the only way code in a sandbox can
-// reach anything outside it, and only to the hosts the operator listed (ADR-0001 D12).
+// reach anything outside it, and only to the hosts the operator listed (ADR-0001 D13), for the tenant the run belongs
+// to when the operator keeps lists per tenant (D21).
 //
 // It speaks CONNECT (HTTPS) and plain-HTTP forwarding. The decision is made on the host name the client asks
 // for; the connection is then made to an address the proxy resolved itself and checked: loopback, private,
@@ -29,7 +30,7 @@ type Policy struct {
 	Hosts []string
 	// Ports the proxy connects to (default 443 and 80).
 	Ports []int
-	// AllowPrivate disables the address check. Tests only.
+	// AllowPrivate disables the address check. Tests only. It is the proxy's (Proxy.Policy), not a tenant's.
 	AllowPrivate bool
 }
 
@@ -76,7 +77,14 @@ func Blocked(a netip.Addr) bool {
 
 // Proxy is the forward proxy.
 type Proxy struct {
-	Policy      Policy
+	// Policy is the allow-list of every run, or with Tenants of the runs whose tenant has no list of its own.
+	Policy Policy
+	// Key, when set, makes every request present the credential the sandbox service made for the run (credential.go):
+	// without a valid one the answer is 407. It says which tenant the run belongs to.
+	Key []byte
+	// Tenants are the allow-lists of the tenants that have their own (D21). A tenant in it gets nothing of Policy.
+	Tenants map[string]Policy
+
 	Log         *slog.Logger
 	MaxConns    int           // concurrent tunnels (default 64)
 	DialTimeout time.Duration // default 10 s
@@ -86,6 +94,7 @@ type Proxy struct {
 		LookupNetIP(ctx context.Context, network, host string) ([]netip.Addr, error)
 	}
 
+	now    func() time.Time // tests
 	active atomic.Int64
 	once   sync.Once
 }
@@ -109,6 +118,9 @@ func (p *Proxy) init() {
 		}
 		if p.Resolver == nil {
 			p.Resolver = net.DefaultResolver
+		}
+		if p.now == nil {
+			p.now = time.Now
 		}
 	})
 }
@@ -166,27 +178,73 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer p.active.Add(-1)
-	if r.Method == http.MethodConnect {
-		p.connect(w, r)
+	who, ok := p.authenticate(w, r)
+	if !ok {
 		return
 	}
-	p.forward(w, r)
+	if r.Method == http.MethodConnect {
+		p.connect(w, r, who)
+		return
+	}
+	p.forward(w, r, who)
 }
 
-func (p *Proxy) deny(w http.ResponseWriter, r *http.Request, host string, port int, why string) {
-	p.Log.Info("egress", "decision", "deny", "host", host, "port", port, "method", r.Method, "why", why, "client", r.RemoteAddr)
+// authenticate finds out which run is asking. Without a key every run is the same and nothing is asked of it.
+func (p *Proxy) authenticate(w http.ResponseWriter, r *http.Request) (Claims, bool) {
+	if len(p.Key) == 0 {
+		return Claims{}, true
+	}
+	// the credential is the password of Proxy-Authorization: Basic; BasicAuth parses the Authorization header
+	_, credential, _ := (&http.Request{Header: http.Header{"Authorization": r.Header["Proxy-Authorization"]}}).BasicAuth()
+	var local netip.Addr
+	if a, ok := r.Context().Value(http.LocalAddrContextKey).(net.Addr); ok {
+		if ap, err := netip.ParseAddrPort(a.String()); err == nil {
+			local = ap.Addr()
+		}
+	}
+	who, err := Verify(p.Key, credential, p.now(), local)
+	if err != nil {
+		p.Log.Info("egress", "decision", "deny", "host", r.Host, "method", r.Method, "why", err.Error(), "client", r.RemoteAddr)
+		w.Header().Set("Proxy-Authenticate", `Basic realm="idp-sandbox-egress"`)
+		http.Error(w, "this proxy serves sandbox runs: "+err.Error(), http.StatusProxyAuthRequired)
+		return Claims{}, false
+	}
+	return who, true
+}
+
+// policyFor is the allow-list of the run's tenant: its own, else the default.
+func (p *Proxy) policyFor(who Claims) Policy {
+	if len(p.Key) == 0 { // nobody said who they are
+		return p.Policy
+	}
+	if t, ok := p.Tenants[who.Tenant]; ok {
+		return t
+	}
+	return p.Policy
+}
+
+// run is what the log says about who asked (nothing without a key: every run is the same then).
+func (p *Proxy) run(who Claims) []any {
+	if len(p.Key) == 0 {
+		return nil
+	}
+	return []any{"tenant", who.Tenant, "workspace", who.Workspace}
+}
+
+func (p *Proxy) deny(w http.ResponseWriter, r *http.Request, who Claims, host string, port int, why string) {
+	p.Log.Info("egress", append([]any{"decision", "deny", "host", host, "port", port, "method", r.Method, "why", why, "client", r.RemoteAddr}, p.run(who)...)...)
 	http.Error(w, "the sandbox may not reach "+host, http.StatusForbidden)
 }
 
-func (p *Proxy) connect(w http.ResponseWriter, r *http.Request) {
+func (p *Proxy) connect(w http.ResponseWriter, r *http.Request, who Claims) {
 	host, port, err := splitHostPort(r.Host, "443")
-	if err != nil || !p.Policy.Allowed(host, port) {
-		p.deny(w, r, host, port, "not on the allow-list")
+	if err != nil || !p.policyFor(who).Allowed(host, port) {
+		p.deny(w, r, who, host, port, "not on the allow-list")
 		return
 	}
 	up, err := p.dial(r.Context(), host, port)
 	if err != nil {
-		p.deny(w, r, host, port, "no acceptable address")
+		p.deny(w, r, who, host, port, "no acceptable address")
 		return
 	}
 	defer up.Close()
@@ -222,19 +280,19 @@ func (p *Proxy) connect(w http.ResponseWriter, r *http.Request) {
 	}()
 	<-done
 	<-done
-	p.Log.Info("egress", "decision", "allow", "host", host, "port", port, "method", "CONNECT", "bytesOut", out, "bytesIn", in, "ms", time.Since(start).Milliseconds())
+	p.Log.Info("egress", append([]any{"decision", "allow", "host", host, "port", port, "method", "CONNECT", "bytesOut", out, "bytesIn", in, "ms", time.Since(start).Milliseconds()}, p.run(who)...)...)
 }
 
 var hopHeaders = []string{"Proxy-Connection", "Proxy-Authenticate", "Proxy-Authorization", "Connection", "Keep-Alive", "Te", "Trailer", "Transfer-Encoding", "Upgrade"}
 
-func (p *Proxy) forward(w http.ResponseWriter, r *http.Request) {
+func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, who Claims) {
 	if r.URL.Scheme != "http" || r.URL.Host == "" {
 		http.Error(w, "this is a proxy: use an absolute http:// URI or CONNECT", http.StatusBadRequest)
 		return
 	}
 	host, port, err := splitHostPort(r.URL.Host, "80")
-	if err != nil || !p.Policy.Allowed(host, port) {
-		p.deny(w, r, host, port, "not on the allow-list")
+	if err != nil || !p.policyFor(who).Allowed(host, port) {
+		p.deny(w, r, who, host, port, "not on the allow-list")
 		return
 	}
 	tr := &http.Transport{DialContext: func(ctx context.Context, _, addr string) (net.Conn, error) {
@@ -251,7 +309,7 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, err := tr.RoundTrip(out)
 	if err != nil {
-		p.deny(w, r, host, port, "upstream failed")
+		p.deny(w, r, who, host, port, "upstream failed")
 		return
 	}
 	defer resp.Body.Close()
@@ -265,5 +323,5 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(resp.StatusCode)
 	n, _ := io.Copy(w, io.LimitReader(resp.Body, p.MaxBytes))
-	p.Log.Info("egress", "decision", "allow", "host", host, "port", port, "method", r.Method, "status", resp.StatusCode, "bytesIn", n)
+	p.Log.Info("egress", append([]any{"decision", "allow", "host", host, "port", port, "method", r.Method, "status", resp.StatusCode, "bytesIn", n}, p.run(who)...)...)
 }
