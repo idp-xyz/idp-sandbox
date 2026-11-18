@@ -82,15 +82,15 @@
   - 代理的出站策略排除的是常见的私网段：集群的 Pod、Service、节点网段若不在其中，要运维自己加。只有 IPv4 规则，IPv6 目的地到不了。
   - 启动探测只在启动时做一次，只连 API 服务器一个地址（与 D20 相同）；`IDP_SANDBOX_NETWORK_CHECK=off` 时这一步也不做。它让服务的启动多约 6 秒（实测：D20 的探测结束到出口探测结束 6.0 秒）。
   - 改名单会滚动代理的 Pod，正在进行的连接会断。代理没有状态，可以多副本，但只测过一个副本。
-  - gVisor / Kata 的 RuntimeClass 下没有测出口。
-  - 平台的 Kubernetes 清单（平台仓库的 `deploy/kubernetes/full`）引用的仍是 `deploy/kubernetes`，没有接出口；出口经网关的端到端没有在集群上走过（`tests/kind/egress.py` 直接带调用者调用沙箱）。
+  - gVisor 下的出口只经平台仓库的 `tests/kind/full.sh`（PATH L，`SANDBOX_RUNTIME_CLASS=gvisor`，2026-11-18）走过：名单内的主机通，名单外 403，绕过代理直连不通，不要网络的运行连不到代理。本仓库 `tests/kind/egress.py` 的 26 项没有在 gVisor 下跑。Kata 下没有测。
+  - 平台的 Kubernetes 清单（平台仓库的 `deploy/kubernetes/full`）已引用 `deploy/kubernetes-egress`（2026-11-18）。出口经网关的端到端由平台的 `tests/kind/full.sh` PATH L 在 kind + Calico 上走过：成员的令牌按 HOST 的方式换成网关的令牌，从网关调用工具；不经过 HOST 和模型。本仓库的 `tests/kind/egress.py` 仍是直接带调用者调用沙箱。
 - **按租户的出口（D21）没有做的**：
   - 租户的真实性来自转发的调用者。没有配网关签名（D18）时，能到达沙箱端口的任何东西都能自称任何租户，也就能用任何租户的白名单；按租户分白名单的部署应同时配 D18。
   - 凭据只约束"哪张名单"，不约束名单里的主机能做什么：同一租户的两个人到得了同样的主机，能上传的主机仍然是外传通道。
   - 凭据可以被运行里的代码读到并带出去。它在过期前、在代理地址相同的另一个运行网络上仍然有效（Docker 会把刚释放的网段再分出去）。这需要原租户的代码主动把凭据交出去，而那样的代码本来就能替别人取回任何它到得了的内容，所以没有再加一次性或与容器绑定的校验。
   - 名单是代理启动时读的文件，改了要重启代理；没有管理接口，也没有让租户管理员自己维护名单的界面。
   - 客户端必须把代理地址里的用户名和密码作为 `Proxy-Authorization` 发出去，否则得到 407。实测的只有 Python 的 urllib（明文与 CONNECT）和 Go 的 net/http；requests、pip、curl、wget 按它们的文档也这样做，没有在运行镜像里逐个试。
-  - 开发拓扑的 `--profile egress` 只渲染检查过配置，没有随 `deploy/e2e.sh` 跑；平台的 compose 与 Kubernetes 清单都没有接出口代理。
+  - 开发拓扑的 `--profile egress` 只渲染检查过配置，没有随 `deploy/e2e.sh` 跑；平台的 compose 没有接出口代理（Kubernetes 清单已接，见 D22 的边界）。
 - **加固运行时的实测情况（2026-11-06）**：
   - **gVisor（runsc 20260126.0，`kvm` 平台）**：Kubernetes 后端在 kind 上 22 项集群检查全过，整平台 PATH D 也过——但那次的内存炸弹是靠超时过的：kind 用 systemd cgroup 驱动，runsc 没开 `systemd-cgroup` 时把 Pod 的 cgroup 路径当成目录名，沙箱跑在 Pod 的 cgroup 之外，运行的内存与 CPU 上限都没生效（256 MiB 的 Pod 分配 2 GiB 不被杀）；开了之后沙箱回到 Pod 的 cgroup，但整个沙箱在 pause 容器的 cgroup 里，kubelet 只给容器关 swap，节点有 swap 时炸弹会先换进 swap（5 次里 2 次拖了 10–17 s 才被杀），所以 `tests/kind/gvisor.sh` 同时给所有 Pod 关了 swap，之后内存炸弹 4.5 s 被 OOM 杀掉，`check.py` 也改成超时不算通过；Docker 后端 20 个隔离测试全在 runsc 下，全过（`tests/integration/gvisor.sh`，docker-in-docker，容器用宿主 cgroup 命名空间时 runsc 能应用 cgroup：内存炸弹被限额杀掉，fork 炸弹耗尽进程数上限、整个沙箱被杀；`CGROUPS=0` 退回 `--ignore-cgroups` 时上限不生效、靠超时挡住）。默认的 `systrap` 平台在这台 WSL2 上起不来（最新 20261102.0：`creating process: out of memory`；20260126.0：`failed to create a syscall thread`），`kvm` 与 `ptrace` 可用，根因没有查；这个环境里所有进程（含节点的 PID 1）都带一个 seccomp 过滤器，可能相关。gVisor 的 `--pids-limit` 数的是沙箱自己的宿主线程，16 起不来，64 可以。与 runc 的差别：`/proc/self/status` 没有 `NoNewPrivs` 与 seccomp 行，写只读根得到 EACCES，`--network none` 的沙箱连回环网卡都没有（更严），Docker 内置 DNS 在其网络栈里不生效（出口代理的地址因此按 IP 给）。
   - **gVisor 下的文件进出与 office 档位（2026-11-17 补测）**：上面的 20 个用例是文件通道（D15）与 office 档位（D14、D16、D17）之前测的。`tests/integration/gvisor.sh` 现在在给了 `IDP_SANDBOX_OFFICE_IMAGE` 时把 office 镜像也装进 docker-in-docker，并按 release 的 sha512 校验下载的 runsc。同一台机器、runsc 20260126.0、`kvm` 平台、宿主 cgroup 命名空间：24 个用例全部通过、没有跳过的，共 92 秒。新增的四个：`TestBinaryFilesMoveUnchanged`（3 MiB 随机字节进出不变，3.7 s）、`TestOfficeDocumentsInTheOfficeProfile`（.NET 单文件二进制在 gVisor 里新建、修改、校验 Word / Excel / PowerPoint，16.4 s）、`TestOfficeDocumentsRoundTrip`（6.1 s）、`TestPDFAndMarkdownRoundTrip`（7.0 s）。所以"成员的文件进出沙箱"这条路径可以整条跑在 gVisor 上，代价是服务仍然要容器引擎套接字。没有测的：这四个用例在 `systrap` 平台和真实（非嵌套）节点上的表现；平台的 compose 没有装 runsc，PATH J 仍在 runc 上。
