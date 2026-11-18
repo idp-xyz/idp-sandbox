@@ -274,6 +274,16 @@ func (m *Manager) TransfersSupported() bool {
 	return ok && b.BinaryFiles() && m.cfg.MaxTransferBytes > 0
 }
 
+// CanPut reports whether PutBytes to this path of this workspace would be admitted: the workspace is the caller's and
+// alive, and the path is one a file may have. An import asks before it presents the member's read ticket, which is
+// good for one use (idp-workspace D27): a wrong workspace id or path must not cost the attachment.
+func (m *Manager) CanPut(owner, id, p string) error {
+	if _, err := CleanPath(p); err != nil {
+		return err
+	}
+	return m.acquire(owner, id, false)
+}
+
 // PutBytes stores any bytes of up to MaxTransferBytes (an imported file); the caller has checked what they are.
 func (m *Manager) PutBytes(ctx context.Context, owner, id, p string, data []byte) error {
 	p, err := CleanPath(p)
@@ -297,6 +307,9 @@ func (m *Manager) GetBytes(ctx context.Context, owner, id, p string) ([]byte, er
 	}
 	if err := m.acquire(owner, id, false); err != nil {
 		return nil, err
+	}
+	if br, ok := m.be.(BinaryReader); ok { // a backend whose ReadFile is for text only
+		return br.ReadBytes(ctx, m.cfg.Namespace+id, p, m.cfg.MaxTransferBytes)
 	}
 	return m.be.ReadFile(ctx, m.cfg.Namespace+id, p, m.cfg.MaxTransferBytes)
 }

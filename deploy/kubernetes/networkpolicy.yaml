@@ -58,6 +58,13 @@ spec:
       ports:
         - {protocol: TCP, port: 6443}
         - {protocol: TCP, port: 443}
+    # With IDP_SANDBOX_FILES_URL (members' files in and out, ADR-0001 D15 and D19) the service also calls the
+    # Workspace's internal file listener, and nothing else there:
+    # - to:
+    #     - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: idp-workspace}}
+    #       podSelector: {matchLabels: {app.kubernetes.io/name: idp-workspace}}
+    #   ports:
+    #     - {protocol: TCP, port: 8561}
 ---
 # idp-sandbox-runs (the untrusted code): nothing in, nothing out. NetworkPolicies only add, so this
 # can only be weakened by someone writing another policy that selects these pods, which review must catch.

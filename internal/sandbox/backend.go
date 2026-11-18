@@ -51,16 +51,21 @@ type FileInfo struct {
 	Size int64  `json:"size"`
 }
 
-// Backend is the isolation layer. The Docker backend (internal/engine) hardens runc containers;
-// a gVisor or Kata runtime is a configuration of the same backend, a Kubernetes Job backend would
-// be another implementation of this interface.
 // BinaryFiles is a Backend that moves any bytes, of up to the transfer limit, in and out of a workspace: the import and
-// export tools are offered only on one (ADR-0001 D15). The Kubernetes backend is not one: its files travel in ConfigMaps
-// (about 1 MiB) and come back through pod logs.
+// export tools are offered only on one (ADR-0001 D15). Both backends are: Docker over the attach stream, Kubernetes in
+// pieces through ConfigMaps and, base64-encoded, pod logs (D19).
 type BinaryFiles interface {
 	BinaryFiles() bool
 }
 
+// BinaryReader is a Backend whose ReadFile is only right for text (the Kubernetes backend reads a pod log) and which
+// reads any bytes another way. The manager uses it for a file that is exported.
+type BinaryReader interface {
+	ReadBytes(ctx context.Context, workspace, path string, max int64) ([]byte, error)
+}
+
+// Backend is the isolation layer. The Docker backend (internal/engine) hardens runc containers, and a gVisor or Kata
+// runtime is a configuration of it; the Kubernetes backend (internal/kube) runs each execution as a Job.
 type Backend interface {
 	Ping(ctx context.Context) error
 	CreateWorkspace(ctx context.Context, name string, sizeBytes int64) error

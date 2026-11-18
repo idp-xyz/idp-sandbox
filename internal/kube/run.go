@@ -77,13 +77,26 @@ var pullFailures = map[string]bool{"ErrImagePull": true, "ImagePullBackOff": tru
 
 // cleanup removes the Job (and through it the pods) and the ConfigMap, with a context of its own so
 // that a cancelled request still cleans up.
-func (k *Kube) cleanup(jobName string, hasCM bool) {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+func (k *Kube) cleanup(jobName string, hasCM bool, chunks int) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second+time.Duration(chunks)*time.Second)
 	defer cancel()
 	_ = k.delete(ctx, "jobs", jobName)
 	if hasCM {
 		_ = k.delete(ctx, "configmaps", jobName)
 	}
+	for i := 0; i < chunks; i++ {
+		_ = k.delete(ctx, "configmaps", chunkName(jobName, i))
+	}
+}
+
+func (k *Kube) putConfigMap(ctx context.Context, name string, js jobSpec, data []byte) error {
+	return k.c.json(ctx, http.MethodPost, k.ns("configmaps"), nil, map[string]any{
+		"apiVersion": "v1", "kind": "ConfigMap",
+		"metadata": map[string]any{"name": name, "labels": map[string]string{
+			LabelKey: k.cfg.Owner, RoleLabel: js.role, WorkspaceLabel: js.workspace}},
+		// binaryData: the bytes are arbitrary, `data` must be UTF-8
+		"binaryData": map[string]string{"data": base64.StdEncoding.EncodeToString(data)},
+	}, nil)
 }
 
 func (k *Kube) workspaceExists(ctx context.Context, name string) error {
@@ -102,26 +115,30 @@ func (k *Kube) execute(ctx context.Context, js jobSpec, timeout time.Duration) (
 	if len(js.input) > MaxInputBytes {
 		return sandbox.RunResult{}, sandbox.ErrFileTooLarge
 	}
-	if err := k.workspaceExists(ctx, js.workspace); err != nil {
+	base := jobBase(js.workspace)
+	if js.noWorkspace {
+		base = "idp-sbx-probe"
+	} else if err := k.workspaceExists(ctx, js.workspace); err != nil {
 		return sandbox.RunResult{}, err
 	}
 	started := time.Now()
-	js.jobName = jobBase(js.workspace) + "-" + js.role[:1] + "-" + randHex(4)
+	js.jobName = base + "-" + js.role[:1] + "-" + randHex(4)
 	js.marker = randHex(8)
 	js.cmd = wrap(js.marker, js.limits.OutputBytes, js.input != nil, stderrFile, js.userCmd)
 	js.deadline = int64((timeout + k.cfg.Grace).Seconds() + 0.999)
 	hasCM := js.input != nil
-	defer k.cleanup(js.jobName, hasCM)
+	defer k.cleanup(js.jobName, hasCM, len(js.chunks))
 
 	if hasCM {
-		err := k.c.json(ctx, http.MethodPost, k.ns("configmaps"), nil, map[string]any{
-			"apiVersion": "v1", "kind": "ConfigMap",
-			"metadata": map[string]any{"name": js.jobName, "labels": map[string]string{
-				LabelKey: k.cfg.Owner, RoleLabel: js.role, WorkspaceLabel: js.workspace}},
-			// binaryData: the bytes are arbitrary, `data` must be UTF-8
-			"binaryData": map[string]string{"data": base64.StdEncoding.EncodeToString(js.input)},
-		}, nil)
-		if err != nil {
+		if err := k.putConfigMap(ctx, js.jobName, js, js.input); err != nil {
+			return sandbox.RunResult{}, err
+		}
+	}
+	for i, c := range js.chunks {
+		if len(c) > MaxInputBytes {
+			return sandbox.RunResult{}, sandbox.ErrFileTooLarge
+		}
+		if err := k.putConfigMap(ctx, chunkName(js.jobName, i), js, c); err != nil {
 			return sandbox.RunResult{}, err
 		}
 	}

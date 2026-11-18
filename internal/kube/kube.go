@@ -42,6 +42,9 @@ type Config struct {
 	HelperImage string
 	// WorkspaceBytes is the usual size of a workspace (informational; CreateWorkspace receives the real one).
 	WorkspaceBytes int64
+	// MaxWriteBytes is the largest file WriteFile takes: a larger one is refused before anything reaches the cluster.
+	// Default MaxInputBytes (what one ConfigMap holds); the service sets it to its transfer limit (D19).
+	MaxWriteBytes int64
 	// Poll is the Job status polling interval (default 300 ms).
 	Poll time.Duration
 	// Grace is added to a run's timeout for the Job's activeDeadlineSeconds: scheduling and image pull
@@ -58,6 +61,7 @@ type Kube struct {
 var (
 	dnsLabel   = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 	labelValue = regexp.MustCompile(`^([A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?)?$`)
+	dnsName    = regexp.MustCompile(`^[A-Za-z0-9]([-A-Za-z0-9.]{0,251}[A-Za-z0-9])?$`)
 )
 
 // New builds the backend and validates the configuration; it does not contact the cluster (Ping does).
@@ -76,6 +80,9 @@ func New(cfg Config) (*Kube, error) {
 	}
 	if cfg.Grace <= 0 {
 		cfg.Grace = 30 * time.Second
+	}
+	if cfg.MaxWriteBytes <= 0 {
+		cfg.MaxWriteBytes = MaxInputBytes
 	}
 	if cfg.HelperImage == "" {
 		return nil, errors.New("no helper (shell) image configured")

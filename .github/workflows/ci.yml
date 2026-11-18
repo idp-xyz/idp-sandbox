@@ -51,3 +51,5 @@ jobs:
           kubectl wait --for=condition=Ready nodes --all --timeout=300s
       - name: The backend against a real cluster (hardening, NetworkPolicy, limits, isolation, clean-up)
         run: bash tests/kind/smoke.sh
+      - name: Files of any content in and out of a workspace, as the service account with its Role and quota (D19)
+        run: bash tests/kind/transfer.sh

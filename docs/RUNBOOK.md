@@ -18,6 +18,8 @@
 | 工作区 | 内存型 tmpfs 卷（内核执行大小），由"锚"容器持有 | PVC（容量由存储驱动决定）|
 | 需要 | Docker 套接字（等于宿主 root，只用于开发或专用节点） | 服务账号 + 运行命名空间里的 Role（Job、ConfigMap、PVC、Pod、Pod 日志）|
 | 出口代理 | 支持（`network: egress`） | 未做 |
+| 成员文件进出 | 支持，经附着流 | 支持（D19），经 ConfigMap 与 Pod 日志，每步是一个 Job：kind 上 25 MiB 写入约 5 秒、读回约 16 秒（gVisor 6 / 21 秒，Kata 8 / 28 秒）|
+| "无网络"靠什么 | 容器没有网卡（`--network none`） | 运行命名空间的 NetworkPolicy，要 CNI 执行；服务启动时自己探测一次（D20）|
 | 更强的运行时 | `IDP_SANDBOX_RUNTIME=runsc`（gVisor）或 `kata` | `IDP_SANDBOX_RUNTIME_CLASS=gvisor` 或 `kata` |
 | 部署 | 单实例 | 单副本，策略 `Recreate`（启动清扫会删同一 owner 的全部对象）|
 
@@ -28,13 +30,15 @@
 | `IDP_SANDBOX_LISTEN` | `/mcp` 的地址；非回环必须同时设 `IDP_SANDBOX_PRIVATE_NETWORK=true` | `127.0.0.1:8570` |
 | `IDP_SANDBOX_METRICS` | 运维端口 | `127.0.0.1:9570` |
 | `IDP_SANDBOX_REQUIRE_CALLER` | 要求网关转发的调用者；`false` 只用于不经网关的开发运行 | `true` |
+| `IDP_SANDBOX_CALLER_KEYS_FILE` / `_CALLER_AUDIENCE` | 网关的公钥（PEM，P-256，可以几把）与本服务在 idp-mcp 里登记的端点；设了之后只认网关签过名的调用者（ADR-0001 D18），两个要一起设 | 无（身份不验签，启动时告警）|
 | `IDP_SANDBOX_MAX_PER_CALLER` | 每个调用者的工作区数 | 8 |
 | `IDP_SANDBOX_MAX_WORKSPACES` / `_MAX_CONCURRENT` | 总工作区数 / 同时运行数 | 64 / 8 |
 | `IDP_SANDBOX_MEMORY_MB` `_CPUS` `_PIDS` `_TIMEOUT_S` `_OUTPUT_KB` `_WORKSPACE_MB` | 每次运行的限额 | 256 / 1 / 64 / 20 / 64 / 64 |
 | `IDP_SANDBOX_IDLE_MIN` | 工作区空闲多久回收 | 30（存活上限 4 小时）|
 | `IDP_SANDBOX_PYTHON_IMAGE` / `_SHELL_IMAGE` | 运行镜像（运维选，调用者不能选；由运维拉取，服务不拉）| `python:3.12-slim` / `alpine:3.22` |
 | `IDP_SANDBOX_OFFICE_IMAGE` | office 运行档位的镜像（ADR-0001 D14、D17）：`bash deploy/office/build.sh` 构建（OfficeCLI、读写 PDF 的五个 wheel 与两个字体文件各按 SHA-256 钉在脚本里，下载后校验，离网构建并冒烟；下载的文件留在 `IDP_SANDBOX_CACHE`，默认 `~/.cache/idp-sandbox`，目录填好之后构建不需要网络）；设了才有 `language: office` | 无（不提供 office）|
-| `IDP_SANDBOX_FILES_URL` | Workspace 的内部文件端点（例 `http://workspace:8560/internal/v1/files`）；设了才有 `sandbox_import_file` / `sandbox_export_file`（ADR-0001 D15）。只限 Docker 后端：Kubernetes 后端设了会拒绝启动 | 无（不搬文件）|
+| `IDP_SANDBOX_FILES_URL` | Workspace 的内部文件端点（例 `http://workspace:8560/internal/v1/files`）；设了才有 `sandbox_import_file` / `sandbox_export_file`（ADR-0001 D15）。两个后端都支持：Docker 走附着流；Kubernetes 把文件切成 ConfigMap 写进去、分段以 base64 从 Pod 日志读回来（D19），服务还要能出站到这个端点（`deploy/kubernetes/networkpolicy.yaml` 里注释掉的那条）| 无（不搬文件）|
+| `IDP_SANDBOX_NETWORK_CHECK` | Kubernetes 后端启动时的网络探测（D20）：`enforce` 发现与运行同标签的 Pod 能连到 API 服务器就拒绝启动；`warn` 只记日志；`off` 不查 | `enforce` |
 | `IDP_SANDBOX_TRANSFER_MB` | 搬进搬出的单个文件上限，不得大于 `IDP_SANDBOX_WORKSPACE_MB` | 25 |
 | `IDP_SANDBOX_RUNTIME` | Docker：OCI 运行时（`runsc`、`kata`）| 守护进程默认 |
 | `IDP_SANDBOX_RUNTIME_CLASS` | Kubernetes：RuntimeClass | 无 |
@@ -69,6 +73,8 @@ Kubernetes：`kubectl apply -k deploy/kubernetes`（先把镜像摘要、API 服
 | 现象 | 原因 | 处理 |
 |---|---|---|
 | 每个请求都是 `the request carries no caller identity` | 服务器没有以 `identity: forward` 注册，或绕过网关直连 | 重新注册（注册后不可改，要新建）；开发直连时设 `IDP_SANDBOX_REQUIRE_CALLER=false` |
+| 每个 `tools/call` 都是 403 `the caller assertion is missing or invalid` | 沙箱要签名（D18）而请求没带对的：网关没设 `IDP_GATEWAY_CALLER_KEY_FILE`、公钥不是那把私钥的、`_CALLER_AUDIENCE` 与登记的端点不逐字相同、两边时钟差超过 30 秒，或有人绕过网关直连 | 看沙箱日志里 `caller assertion refused` 的 `reason`；对一下网关启动日志里的 `kid` 与沙箱启动日志里的 `keys` |
+| Kubernetes 后端启动即退出：`a pod labelled like a run reached …` | 运行命名空间的 NetworkPolicy 没有应用，或集群的 CNI 不执行 NetworkPolicy（D20）| 应用 `deploy/kubernetes/networkpolicy.yaml`；换一个执行策略的 CNI（Calico、Cilium）。确认只是开发环境时 `IDP_SANDBOX_NETWORK_CHECK=warn` |
 | 工具列表变了 / 网关说目录漂移 | 改了 schema（出口、限额）| 对服务器重新 discover、评审、发布 Release |
 | `workspace not found or expired` | id 不对、属于别的调用者、已过期或沙箱重启过 | 重新 `sandbox_create`（别的调用者的 id 与不存在的 id 回答一样，这是有意的）|
 | `the sandbox is at capacity` | 并发或总数上限 | 稍后重试；调大 `_MAX_CONCURRENT` / `_MAX_WORKSPACES` |
@@ -89,7 +95,7 @@ Kubernetes：`kubectl apply -k deploy/kubernetes`（先把镜像摘要、API 服
 ## 7. 安全边界（运维要知道的）
 
 - 默认运行时（runc）与宿主共享内核：对真正不可信的代码，上 gVisor 或 Kata，并保留全部其他层（无网络、限额、非 root、无令牌、按调用者隔离）。
-- 身份这一跳没有签名：只有网关能到达沙箱的网络策略就是边界，不要把 8570 暴露给别人。
+- 身份这一跳的签名要配置：给网关一把 P-256 私钥（`IDP_GATEWAY_CALLER_KEY_FILE`），把公钥给沙箱（`IDP_SANDBOX_CALLER_KEYS_FILE`），并告诉沙箱它在 idp-mcp 里登记的端点（`IDP_SANDBOX_CALLER_AUDIENCE`，要与登记的 URL 逐字相同）。生成：`openssl ecparam -name prime256v1 -genkey -noout -out caller.key && openssl ec -in caller.key -pubout -out caller.pub`。换钥匙时先把新公钥追加进沙箱的文件并重启沙箱，再换网关的私钥，最后删掉旧公钥。没配时，只有网关能到达沙箱的网络策略就是边界，不要把 8570 暴露给别人；配了也保留这条网络策略。
 - Docker 后端要 Docker 套接字：专用节点、虚拟机或 rootless 引擎，不要和别的服务共用。
 - 出口白名单对所有调用者一样，按主机名；能上传的主机会成为外传通道。
 - 加固运行时的实测数据和限制见 ADR 第 5 节。

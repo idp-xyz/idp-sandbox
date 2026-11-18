@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 )
 
@@ -98,6 +99,11 @@ type Server struct {
 	Instructions  string
 	Tools         []Tool
 	byName        map[string]*Tool
+	// Callers, if set, makes every tools/call prove its caller with the gateway's assertion (ADR-0001 D18): the caller
+	// is then what the gateway signed, and the unsigned MetaCaller is ignored. Without it the caller is MetaCaller as
+	// it arrived, which is only as trustworthy as the network.
+	Callers *CallerVerifier
+	Log     *slog.Logger
 }
 
 // New builds the server.
@@ -243,6 +249,24 @@ func (s *Server) call(w http.ResponseWriter, r *http.Request, id json.RawMessage
 		write(w, 400, id, nil, &Error{CodeMismatch, "invalid MCP routing header: Mcp-Name", nil})
 		return
 	}
+	var c Caller
+	var meta map[string]json.RawMessage
+	_ = json.Unmarshal(params["_meta"], &meta)
+	if s.Callers != nil {
+		var assertion string
+		_ = json.Unmarshal(meta[MetaCallerAssertion], &assertion)
+		verified, err := s.Callers.Verify(assertion, "tools/call", params)
+		if err != nil {
+			if s.Log != nil {
+				s.Log.Warn("caller assertion refused", "tool", name, "reason", err.Error(), "remote", r.RemoteAddr)
+			}
+			write(w, http.StatusForbidden, id, nil, &Error{CodeInvalidRequest, ErrAssertion.Error(), nil})
+			return
+		}
+		c = verified
+	} else {
+		_ = json.Unmarshal(meta[MetaCaller], &c)
+	}
 	t := s.byName[name]
 	if t == nil {
 		write(w, 200, id, nil, &Error{CodeInvalidParams, "Unknown tool: " + name, nil})
@@ -254,11 +278,6 @@ func (s *Server) call(w http.ResponseWriter, r *http.Request, id json.RawMessage
 			write(w, 200, id, nil, &Error{CodeInvalidParams, "arguments must be an object", nil})
 			return
 		}
-	}
-	var c Caller
-	var meta map[string]json.RawMessage
-	if json.Unmarshal(params["_meta"], &meta) == nil {
-		_ = json.Unmarshal(meta[MetaCaller], &c)
 	}
 	res := t.Call(r.WithContext(context.WithValue(r.Context(), callerKey{}, c)), args)
 	out := map[string]any{"resultType": "complete", "content": []map[string]any{{"type": "text", "text": res.Text}}}

@@ -45,6 +45,8 @@ type workspaceFiles struct {
 	inName    string
 	delivered []byte
 	name      string
+	reads     int  // how often a read ticket was presented
+	once      bool // a read ticket works once, as the Workspace's do (idp-workspace D27)
 }
 
 func (w *workspaceFiles) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
@@ -55,6 +57,12 @@ func (w *workspaceFiles) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case r.Method == http.MethodGet && c.Kind == "read":
+		if w.reads++; w.once && w.reads > 1 {
+			rw.Header().Set("Content-Type", "application/json")
+			rw.WriteHeader(http.StatusConflict)
+			_, _ = rw.Write([]byte(`{"error":{"code":"TICKET_SPENT","message":"this attachment was already copied into a workspace; keep working on the file you imported"}}`))
+			return
+		}
 		rw.Header().Set("Content-Disposition", `attachment; filename="`+w.inName+`"`)
 		rw.Header().Set("Idp-File-Ref", "file-in")
 		_, _ = rw.Write(w.in)
@@ -174,5 +182,40 @@ func TestTransferToolsNeedABinaryBackendAndAnEndpoint(t *testing.T) {
 	defer plain.Close()
 	if l := toolNames(t, plain); strings.Contains(l, "sandbox_export_file") {
 		t.Fatal("transfer tools without the Workspace's endpoint")
+	}
+}
+
+// A read ticket is good for one use (idp-workspace D27). The sandbox therefore does not present it for an import that
+// could not land, and tells the agent what the Workspace says when it is presented a second time.
+func TestAnImportSpendsTheTicketOnlyWhenTheFileCanLand(t *testing.T) {
+	f := &fake{files: map[string][]byte{}}
+	ws := &workspaceFiles{in: docx(t, "v1"), inName: "q.docx", once: true}
+	ts, wts := transferServer(t, binfake{f}, ws)
+	defer ts.Close()
+	defer wts.Close()
+	said := func(r map[string]any) string { return r["content"].([]any)[0].(map[string]any)["text"].(string) }
+	id := callAs(t, ts, "bob", "sandbox_create", nil)["structuredContent"].(map[string]any)["workspaceId"].(string)
+	read := ticket("acme", "bob", "read")
+	for name, args := range map[string]map[string]any{
+		"a workspace that does not exist": {"workspaceId": strings.Repeat("0", 32), "source": read, "path": "in/q.docx"},
+		"a path outside the workspace":    {"workspaceId": id, "source": read, "path": "../q.docx"},
+		"a reserved path":                 {"workspaceId": id, "source": read, "path": ".idp/q.docx"},
+	} {
+		if r := callAs(t, ts, "bob", "sandbox_import_file", args); r["isError"] == nil {
+			t.Errorf("%s: imported: %v", name, r)
+		}
+	}
+	if ws.reads != 0 {
+		t.Fatalf("the ticket was presented %d times for imports that could not land", ws.reads)
+	}
+	if r := callAs(t, ts, "bob", "sandbox_import_file", map[string]any{"workspaceId": id, "source": read, "path": "in/q.docx"}); r["isError"] != nil || ws.reads != 1 {
+		t.Fatalf("%v (presented %d times)", r, ws.reads)
+	}
+	r := callAs(t, ts, "bob", "sandbox_import_file", map[string]any{"workspaceId": id, "source": read, "path": "in/again.docx"})
+	if r["isError"] == nil || !strings.Contains(said(r), "already copied") || f.files["idp-sbx-"+id+"/in/again.docx"] != nil {
+		t.Fatalf("a second import: %v", r)
+	}
+	if !bytes.Equal(f.files["idp-sbx-"+id+"/in/q.docx"], ws.in) {
+		t.Fatal("the first import is no longer there")
 	}
 }

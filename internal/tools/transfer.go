@@ -45,6 +45,10 @@ func transferTools(a *api, m *sandbox.Manager, fc *files.Client) []mcp.Tool {
 				if err := files.For(in.Source, "read", owner); err != nil {
 					return mcp.Result{Text: err.Error(), IsError: true}, detail + " ticket=refused"
 				}
+				// the ticket is spent by presenting it (idp-workspace D27): first make sure the file has somewhere to go
+				if err := m.CanPut(owner, in.WorkspaceID, in.Path); err != nil {
+					return failure(err), detail
+				}
 				f, data, err := fc.Get(ctx, in.Source)
 				if err != nil {
 					a.log.Warn("import", "err", err)

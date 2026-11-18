@@ -52,6 +52,18 @@ spec:
               value: idp-sandbox
             # - name: IDP_SANDBOX_STORAGE_CLASS      # default: the cluster's default class
             # - name: IDP_SANDBOX_RUNTIME_CLASS      # gvisor or kata: strongly recommended for untrusted code
+            # Members' files in and out (ADR-0001 D15, D19): the Workspace's internal file endpoint. The service then also
+            # needs egress to it (networkpolicy.yaml) and offers sandbox_import_file and sandbox_export_file, which the
+            # gateway has to discover and a reviewer approve.
+            # - name: IDP_SANDBOX_FILES_URL
+            #   value: http://idp-workspace-internal.idp-workspace.svc.cluster.local:8561/internal/v1/files
+            # The gateway's signature over the caller (ADR-0001 D18). Mount the gateway's public key (a ConfigMap: it is
+            # not a secret) and name this Service's endpoint as it is registered in idp-mcp. Without these two, only the
+            # NetworkPolicy vouches for who is calling.
+            # - name: IDP_SANDBOX_CALLER_KEYS_FILE
+            #   value: /etc/idp/gateway/caller.pub
+            # - name: IDP_SANDBOX_CALLER_AUDIENCE
+            #   value: http://idp-sandbox.idp-sandbox.svc.cluster.local:8570/mcp
             - name: IDP_SANDBOX_PYTHON_IMAGE         # pin by digest; pulled by the nodes, never chosen by callers
               value: python:3.12-slim
             - name: IDP_SANDBOX_SHELL_IMAGE

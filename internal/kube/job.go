@@ -23,10 +23,15 @@ type jobSpec struct {
 	userCmd   []string // what to run
 	cmd       []string // the container command: userCmd inside the stderr wrapper
 	input     []byte   // mounted read-only at /in/data (and fed to the command's stdin); nil mounts nothing
-	limits    sandbox.Limits
-	marker    string
-	jobName   string
-	deadline  int64 // activeDeadlineSeconds
+	// chunks are the pieces of a file too large for one ConfigMap (D19): each is a ConfigMap of its own, and together
+	// they are mounted read-only at /in as c00000, c00001, ... Not used together with input.
+	chunks [][]byte
+	// noWorkspace: a pod with no claim mounted (the network probe, D20); it works in /tmp.
+	noWorkspace bool
+	limits      sandbox.Limits
+	marker      string
+	jobName     string
+	deadline    int64 // activeDeadlineSeconds
 }
 
 // wrap makes the container's own stderr separable from stdout in the pod log, which merges the two:
@@ -57,6 +62,9 @@ func milliCPU(c float64) string {
 func (k *Kube) jobObject(js jobSpec) map[string]any {
 	lim := js.limits
 	labels := map[string]string{LabelKey: k.cfg.Owner, RoleLabel: js.role, WorkspaceLabel: js.workspace}
+	if js.noWorkspace {
+		delete(labels, WorkspaceLabel)
+	}
 	mem := fmt.Sprint(lim.MemoryBytes)
 	resources := map[string]any{
 		"requests": map[string]string{"memory": mem, "cpu": milliCPU(lim.CPUs)},
@@ -72,9 +80,22 @@ func (k *Kube) jobObject(js jobSpec) map[string]any {
 		// against the container's memory limit, like the Docker backend's /tmp
 		map[string]any{"name": "tmp", "emptyDir": map[string]any{"medium": "Memory", "sizeLimit": fmt.Sprint(lim.TmpBytes)}},
 	}
+	workingDir := "/work"
+	if js.noWorkspace {
+		mounts, volumes, workingDir = mounts[1:], volumes[1:], "/tmp"
+	}
 	if js.input != nil {
 		mounts = append(mounts, map[string]any{"name": "in", "mountPath": "/in", "readOnly": true})
 		volumes = append(volumes, map[string]any{"name": "in", "configMap": map[string]any{"name": js.jobName, "defaultMode": 0444}})
+	}
+	if len(js.chunks) > 0 {
+		sources := make([]any, len(js.chunks))
+		for i := range js.chunks {
+			sources[i] = map[string]any{"configMap": map[string]any{"name": chunkName(js.jobName, i),
+				"items": []any{map[string]any{"key": "data", "path": fmt.Sprintf("c%05d", i)}}}}
+		}
+		mounts = append(mounts, map[string]any{"name": "in", "mountPath": "/in", "readOnly": true})
+		volumes = append(volumes, map[string]any{"name": "in", "projected": map[string]any{"defaultMode": 0444, "sources": sources}})
 	}
 	pod := map[string]any{
 		"restartPolicy":                 "Never",
@@ -91,7 +112,7 @@ func (k *Kube) jobObject(js jobSpec) map[string]any {
 		},
 		"containers": []any{map[string]any{
 			"name": "run", "image": js.image, "imagePullPolicy": "IfNotPresent",
-			"command": js.cmd, "workingDir": "/work",
+			"command": js.cmd, "workingDir": workingDir,
 			"env": []any{
 				map[string]any{"name": "HOME", "value": "/tmp"},
 				map[string]any{"name": "LANG", "value": "C.UTF-8"},
@@ -128,6 +149,9 @@ func (k *Kube) jobObject(js jobSpec) map[string]any {
 		},
 	}
 }
+
+// chunkName is the ConfigMap of the i-th piece of a chunked input.
+func chunkName(jobName string, i int) string { return fmt.Sprintf("%s-%d", jobName, i) }
 
 // jobBase shortens a workspace name so that <base>-<r|f>-<8 hex> is a valid name (pod names add a suffix).
 func jobBase(ws string) string {

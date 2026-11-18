@@ -17,10 +17,18 @@
 //	IDP_SANDBOX_EGRESS_PORT     its port (default 3128)
 //	IDP_SANDBOX_REQUIRE_CALLER  default true: a request must carry the caller the gateway forwards (register the
 //	                           server in idp-mcp with identity=forward); false only for a standalone development run
+//	IDP_SANDBOX_CALLER_KEYS_FILE  PEM public key(s) of the gateway (P-256): every tools/call must then carry the gateway's
+//	                           assertion over the caller (ADR-0001 D18; the gateway's IDP_GATEWAY_CALLER_KEY_FILE), signed for
+//	IDP_SANDBOX_CALLER_AUDIENCE   this server's endpoint as registered in idp-mcp, for example http://sandbox:8570/mcp.
+//	                           Unset: the forwarded caller is taken as it arrives, and only the private network vouches for it
 //	IDP_SANDBOX_MAX_PER_CALLER  workspaces one caller may hold (default 8)
 //	IDP_SANDBOX_WORKSPACE_MB IDP_SANDBOX_MAX_WORKSPACES IDP_SANDBOX_MAX_CONCURRENT IDP_SANDBOX_IDLE_MIN
+//	IDP_SANDBOX_NETWORK_CHECK   Kubernetes backend: enforce (default) refuses to start when a pod labelled like a run can
+//	                           reach the API server (the NetworkPolicy is missing or the CNI does not enforce it, D20);
+//	                           warn logs it and starts; off does not look
 //	IDP_SANDBOX_FILES_URL       the Workspace's internal file endpoint (e.g. http://workspace:8560/internal/v1/files); set,
-//	                           it offers sandbox_import_file and sandbox_export_file (ADR-0001 D15; docker backend only)
+//	                           it offers sandbox_import_file and sandbox_export_file (ADR-0001 D15; on Kubernetes the bytes
+//	                           travel in pieces through ConfigMaps and pod logs, D19)
 //	IDP_SANDBOX_TRANSFER_MB     largest file moved in or out (default 25; at most the workspace's size)
 package main
 
@@ -161,6 +169,43 @@ func main() {
 		os.Exit(1)
 	}
 	cancel()
+	// D20: on Kubernetes "no network" is a NetworkPolicy, which holds only where the CNI enforces it. Find out before
+	// serving: a pod labelled like a run must not reach the API server.
+	if p, ok := be.(interface {
+		APIServerAddr() (string, int, bool)
+		NetworkProbe(context.Context, string, int) (bool, error)
+	}); ok {
+		switch mode := env("IDP_SANDBOX_NETWORK_CHECK", "enforce"); mode {
+		case "off":
+			log.Warn("the network probe is off: nothing checks that run pods are cut off from the network")
+		case "enforce", "warn":
+			host, port, usable := p.APIServerAddr()
+			if !usable {
+				log.Warn("the network probe was skipped: the API server address is not one a pod would use", "address", host)
+				break
+			}
+			probeCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
+			reached, err := p.NetworkProbe(probeCtx, host, port)
+			cancel()
+			switch {
+			case err != nil && mode == "enforce":
+				fmt.Fprintln(os.Stderr, "the network probe could not run (IDP_SANDBOX_NETWORK_CHECK=warn or off to start anyway):", err)
+				os.Exit(1)
+			case err != nil:
+				log.Warn("the network probe could not run", "err", err)
+			case reached && mode == "enforce":
+				fmt.Fprintf(os.Stderr, "a pod labelled like a run reached %s:%d: the NetworkPolicy of the runs namespace is missing or the cluster's CNI does not enforce it, so runs would have the network. Refusing to start (IDP_SANDBOX_NETWORK_CHECK=warn or off to start anyway)\n", host, port)
+				os.Exit(1)
+			case reached:
+				log.Error("RUNS ARE NOT CUT OFF FROM THE NETWORK: a pod labelled like a run reached the API server", "address", host, "port", port)
+			default:
+				log.Info("run pods are cut off from the network (the probe could not reach the API server)", "address", host, "port", port)
+			}
+		default:
+			fmt.Fprintf(os.Stderr, "IDP_SANDBOX_NETWORK_CHECK must be enforce, warn or off, not %q\n", mode)
+			os.Exit(2)
+		}
+	}
 	mgr, err := sandbox.New(ctx, cfg, be, log)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -170,7 +215,7 @@ func main() {
 	var fc *files.Client
 	if u := os.Getenv("IDP_SANDBOX_FILES_URL"); u != "" {
 		if !mgr.TransfersSupported() {
-			fmt.Fprintln(os.Stderr, "IDP_SANDBOX_FILES_URL is set but this backend does not move files byte for byte (docker only)")
+			fmt.Fprintln(os.Stderr, "IDP_SANDBOX_FILES_URL is set but this backend does not move files byte for byte, or IDP_SANDBOX_TRANSFER_MB is 0")
 			os.Exit(2)
 		}
 		fc = files.NewClient(u, cfg.MaxTransferBytes)
@@ -179,6 +224,24 @@ func main() {
 	srv := mcp.New("idp-sandbox", version,
 		"Runs code in an isolated sandbox: create a workspace, write files, run Python or shell, read the results. There is no network and nothing persists beyond the workspace.",
 		tools.NewWithFiles(mgr, log, met, fc))
+
+	srv.Log = log
+	if f := os.Getenv("IDP_SANDBOX_CALLER_KEYS_FILE"); f != "" {
+		b, err := os.ReadFile(f)
+		if err == nil {
+			srv.Callers, err = mcp.NewCallerVerifier(b, os.Getenv("IDP_SANDBOX_CALLER_AUDIENCE"))
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "IDP_SANDBOX_CALLER_KEYS_FILE / IDP_SANDBOX_CALLER_AUDIENCE:", err)
+			os.Exit(2)
+		}
+		log.Info("callers must be signed by the gateway", "audience", os.Getenv("IDP_SANDBOX_CALLER_AUDIENCE"), "keys", srv.Callers.KeyIDs())
+	} else if os.Getenv("IDP_SANDBOX_CALLER_AUDIENCE") != "" {
+		fmt.Fprintln(os.Stderr, "IDP_SANDBOX_CALLER_AUDIENCE is set without IDP_SANDBOX_CALLER_KEYS_FILE")
+		os.Exit(2)
+	} else if cfg.RequireOwner {
+		log.Warn("the caller the gateway forwards is not verified: anything that reaches this port can name any caller (set IDP_SANDBOX_CALLER_KEYS_FILE and IDP_SANDBOX_CALLER_AUDIENCE)")
+	}
 
 	mux := http.NewServeMux()
 	mux.Handle("/mcp", srv)

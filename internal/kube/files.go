@@ -24,6 +24,12 @@ func (k *Kube) WriteFile(ctx context.Context, workspace, p string, data []byte) 
 	if data == nil {
 		data = []byte{}
 	}
+	if int64(len(data)) > k.cfg.MaxWriteBytes {
+		return sandbox.ErrFileTooLarge
+	}
+	if len(data) > chunkIn { // more than one ConfigMap holds: an imported file (D19)
+		return k.writeChunked(ctx, workspace, p, data)
+	}
 	res, err := k.fileOp(ctx, workspace, []string{"sh", "-c", `mkdir -p "$(dirname "$1")" && cat ` + inputPath + ` > "$1"`, "sh", "/work/" + p}, data, 4096)
 	if err != nil {
 		return err

@@ -9,9 +9,13 @@ services:
     security_opt: ['no-new-privileges:true']
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ${IDP_CALLER_KEYS:?run deploy/e2e.sh}/gateway.pub:/etc/idp/gateway.pub:ro
     environment:
       IDP_SANDBOX_LISTEN: 0.0.0.0:8570
       IDP_SANDBOX_PRIVATE_NETWORK: 'true'
+      # the caller is the one the gateway signed (D18): the gateway's public key, and this server's endpoint as registered
+      IDP_SANDBOX_CALLER_KEYS_FILE: /etc/idp/gateway.pub
+      IDP_SANDBOX_CALLER_AUDIENCE: http://sandbox:8570/mcp
       IDP_SANDBOX_METRICS: 0.0.0.0:9570
       IDP_SANDBOX_OWNER: e2e
       IDP_SANDBOX_EGRESS_PROXY: ${IDP_SANDBOX_EGRESS_PROXY:-}   # idp-sandbox-egress with --profile egress
@@ -21,6 +25,11 @@ services:
     environment:
       IDP_ALLOWED_UPSTREAM_HOSTS: minimal,reference,sandbox
       IDP_PRIVATE_UPSTREAM_HOSTS: minimal,reference,sandbox
+  mcp-gateway:
+    environment:
+      IDP_GATEWAY_CALLER_KEY_FILE: /etc/idp/caller.key   # signs the caller it forwards (idp-mcp D44)
+    volumes:
+      - ${IDP_CALLER_KEYS:?run deploy/e2e.sh}/gateway.key:/etc/idp/caller.key:ro
   # OPTIONAL (docker compose --profile egress): the allow-listed egress proxy and the sandbox pointed at it, which
   # adds the network=egress option to sandbox_run (a change of the tool's schema: the gateway pins it, so discover
   # and re-approve the server). IDP_EGRESS_HOSTS is the allow-list (exact names or *.suffix); empty denies all.

@@ -26,5 +26,6 @@ func newKubeBackend(cfg sandbox.Config) (sandbox.Backend, error) {
 		Owner:          env("IDP_SANDBOX_OWNER", "default"),
 		HelperImage:    cfg.Languages["shell"].Image,
 		WorkspaceBytes: cfg.Limits.WorkspaceBytes,
+		MaxWriteBytes:  max(cfg.MaxFileBytes, cfg.MaxTransferBytes),
 	})
 }
