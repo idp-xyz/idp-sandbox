@@ -1,0 +1,97 @@
+# The egress proxy (cmd/idp-sandbox-egress): the one way out for runs that asked for network=egress. It lives in the
+# service's namespace, not with the runs: it is the operator's code and holds the key. It has no credential for the
+# Kubernetes API and keeps no state, so it may run in several replicas.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: idp-sandbox-egress
+  namespace: idp-sandbox
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: idp-sandbox-egress
+  namespace: idp-sandbox
+  labels:
+    app.kubernetes.io/component: egress
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: egress
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: egress
+    spec:
+      serviceAccountName: idp-sandbox-egress
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: egress
+          image: idp-sandbox-egress
+          ports:
+            - name: proxy
+              containerPort: 3128
+          env:
+            - name: IDP_EGRESS_LISTEN
+              value: "0.0.0.0:3128"
+            # every request must carry the credential the sandbox service made for the run (D21)
+            - name: IDP_EGRESS_KEY_FILE
+              value: /etc/idp/egress/egress.key
+            # who may reach what: default and per tenant
+            - name: IDP_EGRESS_TENANTS_FILE
+              value: /etc/idp/tenants/tenants.yaml
+          readinessProbe:
+            tcpSocket:
+              port: proxy
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: proxy
+            periodSeconds: 20
+          resources:
+            requests: {cpu: 50m, memory: 32Mi}
+            limits: {cpu: "1", memory: 256Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: egress-key
+              mountPath: /etc/idp/egress
+              readOnly: true
+            - name: tenants
+              mountPath: /etc/idp/tenants
+              readOnly: true
+      volumes:
+        - name: egress-key
+          secret:
+            secretName: idp-sandbox-egress-key
+            defaultMode: 0444
+        - name: tenants
+          configMap:
+            name: idp-sandbox-egress-tenants
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: idp-sandbox-egress
+  namespace: idp-sandbox
+  labels:
+    app.kubernetes.io/component: egress
+spec:
+  selector:
+    app.kubernetes.io/component: egress
+  ports:
+    - name: proxy
+      port: 3128
+      targetPort: proxy

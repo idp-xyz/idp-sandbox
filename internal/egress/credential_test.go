@@ -55,6 +55,33 @@ func TestACredentialSaysTheTenantOnTheRunsNetworkUntilItExpires(t *testing.T) {
 	}
 }
 
+// D22: on Kubernetes every run reaches the proxy on one address, so the service names none. Such a credential is still
+// the service's, and still ends; and a run cannot turn its own, tied to an address, into one that is not.
+func TestACredentialThatNamesNoAddressIsGoodOnAny(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	cred, err := Mint(testKey, Claims{Tenant: "acme", Expires: now.Add(time.Minute).Unix()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, local := range []netip.Addr{netip.MustParseAddr("192.168.82.7"), netip.MustParseAddr("fd00::7"), {}} {
+		if c, err := Verify(testKey, cred, now, local); err != nil || c.Tenant != "acme" || c.Proxy != "" {
+			t.Errorf("on %v: %+v %v", local, c, err)
+		}
+	}
+	if _, err := Verify(testKey, cred, now.Add(time.Minute), netip.MustParseAddr("192.168.82.7")); !errors.Is(err, ErrExpired) {
+		t.Errorf("past its time: %v", err)
+	}
+	if _, err := Verify([]byte("ffffffffffffffffffffffffffffffff"), cred, now, netip.Addr{}); !errors.Is(err, ErrBadCredential) {
+		t.Errorf("another key: %v", err)
+	}
+	tied, _ := Mint(testKey, Claims{Tenant: "acme", Proxy: "172.20.0.2", Expires: now.Add(time.Minute).Unix()})
+	_, sig, _ := strings.Cut(tied, ".")
+	free, _, _ := strings.Cut(cred, ".")
+	if _, err := Verify(testKey, free+"."+sig, now, netip.MustParseAddr("172.21.0.2")); !errors.Is(err, ErrBadCredential) {
+		t.Errorf("the claims of a credential without an address under the signature of one with: %v", err)
+	}
+}
+
 func TestMintAndLoadKeyRefuseWhatCannotWork(t *testing.T) {
 	if _, err := Mint([]byte("short"), Claims{Proxy: "10.0.0.1"}); err == nil {
 		t.Error("a short key signed")

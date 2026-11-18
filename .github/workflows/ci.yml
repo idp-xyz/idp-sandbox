@@ -53,3 +53,5 @@ jobs:
         run: bash tests/kind/smoke.sh
       - name: Files of any content in and out of a workspace, as the service account with its Role and quota (D19)
         run: bash tests/kind/transfer.sh
+      - name: Egress on the Kubernetes backend, per tenant, through the proxy and nothing around it (D22)
+        run: bash tests/kind/egress.sh

@@ -28,10 +28,14 @@ type jobSpec struct {
 	chunks [][]byte
 	// noWorkspace: a pod with no claim mounted (the network probe, D20); it works in /tmp.
 	noWorkspace bool
-	limits      sandbox.Limits
-	marker      string
-	jobName     string
-	deadline    int64 // activeDeadlineSeconds
+	// egress labels the pod as one that may reach the egress proxy (D22); proxy, when set, is the proxy URL its HTTP
+	// clients are told to use. Only a run asks for either, and only when the caller asked for the network.
+	egress   bool
+	proxy    string
+	limits   sandbox.Limits
+	marker   string
+	jobName  string
+	deadline int64 // activeDeadlineSeconds
 }
 
 // wrap makes the container's own stderr separable from stdout in the pod log, which merges the two:
@@ -64,6 +68,20 @@ func (k *Kube) jobObject(js jobSpec) map[string]any {
 	labels := map[string]string{LabelKey: k.cfg.Owner, RoleLabel: js.role, WorkspaceLabel: js.workspace}
 	if js.noWorkspace {
 		delete(labels, WorkspaceLabel)
+	}
+	if js.egress && js.role == "run" {
+		labels[NetworkLabel] = NetworkEgress
+	}
+	env := []any{
+		map[string]any{"name": "HOME", "value": "/tmp"},
+		map[string]any{"name": "LANG", "value": "C.UTF-8"},
+		map[string]any{"name": "PYTHONDONTWRITEBYTECODE", "value": "1"},
+		map[string]any{"name": "PYTHONUNBUFFERED", "value": "1"},
+	}
+	if js.proxy != "" {
+		for _, name := range []string{"HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"} {
+			env = append(env, map[string]any{"name": name, "value": js.proxy})
+		}
 	}
 	mem := fmt.Sprint(lim.MemoryBytes)
 	resources := map[string]any{
@@ -113,12 +131,7 @@ func (k *Kube) jobObject(js jobSpec) map[string]any {
 		"containers": []any{map[string]any{
 			"name": "run", "image": js.image, "imagePullPolicy": "IfNotPresent",
 			"command": js.cmd, "workingDir": workingDir,
-			"env": []any{
-				map[string]any{"name": "HOME", "value": "/tmp"},
-				map[string]any{"name": "LANG", "value": "C.UTF-8"},
-				map[string]any{"name": "PYTHONDONTWRITEBYTECODE", "value": "1"},
-				map[string]any{"name": "PYTHONUNBUFFERED", "value": "1"},
-			},
+			"env": env,
 			"securityContext": map[string]any{
 				"runAsNonRoot": true, "runAsUser": sandboxUID, "runAsGroup": sandboxUID,
 				"privileged": false, "allowPrivilegeEscalation": false, "readOnlyRootFilesystem": true,

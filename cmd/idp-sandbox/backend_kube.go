@@ -14,7 +14,9 @@ import (
 //	IDP_SANDBOX_OWNER          label value that scopes the sweep (default "default")
 //	IDP_SANDBOX_KUBE_API       explicit API server URL (default: in-cluster); with IDP_SANDBOX_KUBE_TOKEN or
 //	                           IDP_SANDBOX_KUBE_TOKEN_FILE and IDP_SANDBOX_KUBE_CA_FILE
-func newKubeBackend(cfg sandbox.Config) (sandbox.Backend, error) {
+//
+// egressProxy, egressPort and egressKey are IDP_SANDBOX_EGRESS_PROXY, _PORT and _KEY_FILE (ADR-0001 D22).
+func newKubeBackend(cfg sandbox.Config, egressProxy string, egressPort int, egressKey []byte) (sandbox.Backend, error) {
 	return kube.New(kube.Config{
 		APIServer:      env("IDP_SANDBOX_KUBE_API", ""),
 		Token:          env("IDP_SANDBOX_KUBE_TOKEN", ""),
@@ -27,5 +29,8 @@ func newKubeBackend(cfg sandbox.Config) (sandbox.Backend, error) {
 		HelperImage:    cfg.Languages["shell"].Image,
 		WorkspaceBytes: cfg.Limits.WorkspaceBytes,
 		MaxWriteBytes:  max(cfg.MaxFileBytes, cfg.MaxTransferBytes),
+		EgressProxy:    egressProxy,
+		EgressPort:     egressPort,
+		EgressKey:      egressKey,
 	})
 }

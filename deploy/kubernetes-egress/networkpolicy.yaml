@@ -1,0 +1,72 @@
+# What the egress proxy adds to deploy/kubernetes/networkpolicy.yaml. NetworkPolicies only add, so everything there
+# still holds: a run without the label below has no network at all, and no pod of the runs namespace takes a
+# connection from anyone (runs cannot reach each other).
+#
+# A run that asked for network=egress carries idp.sandbox/network=egress (internal/kube; the service decides, a caller
+# cannot label a pod). It may open connections to the proxy's pods on the proxy's port. Nothing else: no DNS (the
+# service tells it the proxy's address), no other pod, no address outside the cluster.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: run-pods-egress-proxy
+  namespace: idp-sandbox-runs
+spec:
+  podSelector:
+    matchLabels:
+      idp.sandbox/role: run
+      idp.sandbox/network: egress
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: idp-sandbox
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/component: egress
+      ports:
+        - {protocol: TCP, port: 3128}
+---
+# The proxy: in from those runs only; out to DNS (allow-dns of the namespace) and to public addresses on the ports the
+# allow-lists use. The proxy itself refuses private, loopback, link-local and metadata addresses; this is the same
+# refusal made by the cluster, so that a bug or a misconfiguration of the proxy does not open the cluster or the
+# operator's network. If the cluster's pod, service or node addresses are not in the ranges excluded below, add them.
+# IPv4 only: with no IPv6 rule the proxy reaches no IPv6 address (it then uses a host's IPv4 one); a cluster that needs
+# IPv6 destinations adds an ipBlock for ::/0 except fc00::/7, fe80::/10, ff00::/8 and its own ranges.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: egress-proxy
+  namespace: idp-sandbox
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: egress
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: idp-sandbox-runs
+          podSelector:
+            matchLabels:
+              idp.sandbox/role: run
+              idp.sandbox/network: egress
+      ports:
+        - {protocol: TCP, port: 3128}
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 0.0.0.0/8
+              - 10.0.0.0/8
+              - 100.64.0.0/10
+              - 127.0.0.0/8
+              - 169.254.0.0/16
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 224.0.0.0/3
+      ports:                             # the ports of tenants.yaml (443 and 80 unless it says otherwise)
+        - {protocol: TCP, port: 443}
+        - {protocol: TCP, port: 80}

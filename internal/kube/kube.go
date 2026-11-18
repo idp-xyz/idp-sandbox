@@ -6,7 +6,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"regexp"
@@ -23,6 +25,10 @@ const LabelKey = "idp.sandbox"
 const (
 	RoleLabel      = "idp.sandbox/role" // "run" or "file"
 	WorkspaceLabel = "idp.sandbox/workspace"
+	// NetworkLabel is on a run that may use the egress proxy, with the value NetworkEgress, and on nothing else: the
+	// NetworkPolicy that lets a pod reach the proxy, and the one that lets the proxy be reached, select it (D22).
+	NetworkLabel  = "idp.sandbox/network"
+	NetworkEgress = "egress"
 )
 
 // Config of the backend.
@@ -50,6 +56,16 @@ type Config struct {
 	// Grace is added to a run's timeout for the Job's activeDeadlineSeconds: scheduling and image pull
 	// happen inside it (default 30 s). The timeout itself is enforced from the moment the pod runs.
 	Grace time.Duration
+
+	// EgressProxy is where runs reach the egress proxy (cmd/idp-sandbox-egress): the DNS name of its Service, which
+	// this service resolves for every run (a run pod has no DNS), or an address. Empty: no run gets the network (D22).
+	EgressProxy string
+	EgressPort  int // default 3128
+	// EgressKey is shared with the proxy (its IDP_EGRESS_KEY_FILE): a run's proxy URL then carries a credential that
+	// says the run's tenant, and the proxy refuses a request without one (D21).
+	EgressKey []byte
+	// Resolve looks EgressProxy up; default the system resolver.
+	Resolve func(ctx context.Context, host string) ([]netip.Addr, error)
 }
 
 // Kube implements sandbox.Backend.
@@ -83,6 +99,24 @@ func New(cfg Config) (*Kube, error) {
 	}
 	if cfg.MaxWriteBytes <= 0 {
 		cfg.MaxWriteBytes = MaxInputBytes
+	}
+	if cfg.EgressPort == 0 {
+		cfg.EgressPort = 3128
+	}
+	if cfg.EgressPort < 1 || cfg.EgressPort > 65535 {
+		return nil, fmt.Errorf("invalid egress proxy port %d", cfg.EgressPort)
+	}
+	if cfg.EgressProxy != "" {
+		if _, err := netip.ParseAddr(cfg.EgressProxy); err != nil && !dnsName.MatchString(cfg.EgressProxy) {
+			return nil, fmt.Errorf("invalid egress proxy %q: the DNS name of its Service, or an address", cfg.EgressProxy)
+		}
+	} else if len(cfg.EgressKey) > 0 {
+		return nil, errors.New("an egress key without an egress proxy")
+	}
+	if cfg.Resolve == nil {
+		cfg.Resolve = func(ctx context.Context, host string) ([]netip.Addr, error) {
+			return net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+		}
 	}
 	if cfg.HelperImage == "" {
 		return nil, errors.New("no helper (shell) image configured")

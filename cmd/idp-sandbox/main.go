@@ -13,7 +13,9 @@
 //	IDP_SANDBOX_RUNTIME        OCI runtime of the runs, for example runsc (gVisor) or kata; default the daemon's
 //	IDP_SANDBOX_OWNER          label value that scopes the sweep (default "default")
 //	IDP_SANDBOX_MEMORY_MB IDP_SANDBOX_CPUS IDP_SANDBOX_PIDS IDP_SANDBOX_TIMEOUT_S IDP_SANDBOX_OUTPUT_KB
-//	IDP_SANDBOX_EGRESS_PROXY    name of the running idp-sandbox-egress container; enables network=egress for runs (default off)
+//	IDP_SANDBOX_EGRESS_PROXY    enables network=egress for runs (default off). Docker backend: the name of the running
+//	                           idp-sandbox-egress container. Kubernetes backend: the DNS name of the proxy's Service (or
+//	                           its cluster IP); the NetworkPolicies of deploy/kubernetes-egress decide who reaches it (D22)
 //	IDP_SANDBOX_EGRESS_PORT     its port (default 3128)
 //	IDP_SANDBOX_EGRESS_KEY_FILE the key shared with the proxy (its IDP_EGRESS_KEY_FILE): a run's proxy URL then carries a
 //	                           credential that says the caller's tenant, and the proxy applies that tenant's allow-list
@@ -138,6 +140,23 @@ func main() {
 		os.Exit(2)
 	}
 
+	// Egress (D13, D21, D22): the proxy runs may be let out through, and the key shared with it. Off without a proxy.
+	egressProxy, egressPort := os.Getenv("IDP_SANDBOX_EGRESS_PROXY"), int(envInt("IDP_SANDBOX_EGRESS_PORT", 3128))
+	var egressKey []byte
+	if f := os.Getenv("IDP_SANDBOX_EGRESS_KEY_FILE"); f != "" {
+		if egressProxy == "" {
+			fmt.Fprintln(os.Stderr, "IDP_SANDBOX_EGRESS_KEY_FILE is set without IDP_SANDBOX_EGRESS_PROXY")
+			os.Exit(2)
+		}
+		key, err := egress.LoadKey(f)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "IDP_SANDBOX_EGRESS_KEY_FILE:", err)
+			os.Exit(2)
+		}
+		egressKey = key
+	}
+	cfg.EgressEnabled = egressProxy != ""
+
 	var be sandbox.Backend
 	switch backend := env("IDP_SANDBOX_BACKEND", "docker"); backend {
 	case "docker":
@@ -148,24 +167,10 @@ func main() {
 		}
 		eng.Runtime = os.Getenv("IDP_SANDBOX_RUNTIME")
 		eng.Owner = env("IDP_SANDBOX_OWNER", "default")
-		if proxy := os.Getenv("IDP_SANDBOX_EGRESS_PROXY"); proxy != "" {
-			eng.EgressProxy, eng.EgressPort = proxy, int(envInt("IDP_SANDBOX_EGRESS_PORT", 3128))
-			cfg.EgressEnabled = true
-			if f := os.Getenv("IDP_SANDBOX_EGRESS_KEY_FILE"); f != "" {
-				key, err := egress.LoadKey(f)
-				if err != nil {
-					fmt.Fprintln(os.Stderr, "IDP_SANDBOX_EGRESS_KEY_FILE:", err)
-					os.Exit(2)
-				}
-				eng.EgressKey = key
-			}
-		} else if os.Getenv("IDP_SANDBOX_EGRESS_KEY_FILE") != "" {
-			fmt.Fprintln(os.Stderr, "IDP_SANDBOX_EGRESS_KEY_FILE is set without IDP_SANDBOX_EGRESS_PROXY")
-			os.Exit(2)
-		}
+		eng.EgressProxy, eng.EgressPort, eng.EgressKey = egressProxy, egressPort, egressKey
 		be = eng
 	case "kubernetes":
-		k, err := newKubeBackend(cfg)
+		k, err := newKubeBackend(cfg, egressProxy, egressPort, egressKey)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
@@ -189,6 +194,7 @@ func main() {
 	if p, ok := be.(interface {
 		APIServerAddr() (string, int, bool)
 		NetworkProbe(context.Context, string, int) (bool, error)
+		EgressProbe(context.Context, string, int) (bool, error, error)
 	}); ok {
 		switch mode := env("IDP_SANDBOX_NETWORK_CHECK", "enforce"); mode {
 		case "off":
@@ -215,6 +221,31 @@ func main() {
 				log.Error("RUNS ARE NOT CUT OFF FROM THE NETWORK: a pod labelled like a run reached the API server", "address", host, "port", port)
 			default:
 				log.Info("run pods are cut off from the network (the probe could not reach the API server)", "address", host, "port", port)
+			}
+			if !cfg.EgressEnabled {
+				break
+			}
+			// D22: a run that may use the egress proxy is let out by a NetworkPolicy of its own. It must lead to the
+			// proxy and nowhere else.
+			probeCtx, cancel = context.WithTimeout(ctx, 90*time.Second)
+			reached, proxyErr, err := p.EgressProbe(probeCtx, host, port)
+			cancel()
+			switch {
+			case err != nil && mode == "enforce":
+				fmt.Fprintln(os.Stderr, "the network probe of runs with network=egress could not run (IDP_SANDBOX_NETWORK_CHECK=warn or off to start anyway):", err)
+				os.Exit(1)
+			case err != nil:
+				log.Warn("the network probe of runs with network=egress could not run", "err", err)
+			case reached && mode == "enforce":
+				fmt.Fprintf(os.Stderr, "a pod labelled like a run with network=egress reached %s:%d: the NetworkPolicy that lets those runs out lets them reach more than the egress proxy. Refusing to start (IDP_SANDBOX_NETWORK_CHECK=warn or off to start anyway)\n", host, port)
+				os.Exit(1)
+			case reached:
+				log.Error("RUNS WITH network=egress REACH MORE THAN THE EGRESS PROXY: a pod labelled like one reached the API server", "address", host, "port", port)
+			case proxyErr != nil:
+				// not a reason to stay down: nothing is exposed, and the proxy may simply start after this service
+				log.Warn("a pod labelled like a run with network=egress did not reach the egress proxy: such runs will fail until the proxy is up and a NetworkPolicy lets them in", "proxy", egressProxy, "err", proxyErr)
+			default:
+				log.Info("run pods with network=egress reach the egress proxy and not the API server", "proxy", egressProxy, "address", host, "port", port)
 			}
 		default:
 			fmt.Fprintf(os.Stderr, "IDP_SANDBOX_NETWORK_CHECK must be enforce, warn or off, not %q\n", mode)

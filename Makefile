@@ -7,8 +7,9 @@ build:
 vet:
 	gofmt -l . | (! grep .) && go vet ./...
 
+# tests/deploy reads the manifests of deploy/kubernetes and deploy/kubernetes-egress; it needs no cluster
 test: vet
-	go test -race ./internal/...
+	go test -race ./internal/... ./tests/deploy/
 
 # The runtime images are pulled by the operator, never by the service (a caller cannot make it fetch anything).
 # the office run profile's image (ADR-0001 D14): officecli pinned by version and SHA-256, built offline

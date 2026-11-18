@@ -17,7 +17,7 @@
 | 隔离 | 每次运行一个加固的容器 | 每次运行一个 Job 的 Pod |
 | 工作区 | 内存型 tmpfs 卷（内核执行大小），由"锚"容器持有 | PVC（容量由存储驱动决定）|
 | 需要 | Docker 套接字（等于宿主 root，只用于开发或专用节点） | 服务账号 + 运行命名空间里的 Role（Job、ConfigMap、PVC、Pod、Pod 日志）|
-| 出口代理 | 支持（`network: egress`） | 未做 |
+| 出口代理 | 支持（`network: egress`）：每次运行一个内部网络，只接着代理 | 支持（D22）：`deploy/kubernetes-egress`，运行的 Pod 多一个标签，两条 NetworkPolicy 只放它到代理；不应用这一层就没有 |
 | 成员文件进出 | 支持，经附着流 | 支持（D19），经 ConfigMap 与 Pod 日志，每步是一个 Job：kind 上 25 MiB 写入约 5 秒、读回约 16 秒（gVisor 6 / 21 秒，Kata 8 / 28 秒）|
 | "无网络"靠什么 | 容器没有网卡（`--network none`） | 运行命名空间的 NetworkPolicy，要 CNI 执行；服务启动时自己探测一次（D20）|
 | 更强的运行时 | `IDP_SANDBOX_RUNTIME=runsc`（gVisor）或 `kata` | `IDP_SANDBOX_RUNTIME_CLASS=gvisor` 或 `kata` |
@@ -42,7 +42,7 @@
 | `IDP_SANDBOX_TRANSFER_MB` | 搬进搬出的单个文件上限，不得大于 `IDP_SANDBOX_WORKSPACE_MB` | 25 |
 | `IDP_SANDBOX_RUNTIME` | Docker：OCI 运行时（`runsc`、`kata`）| 守护进程默认 |
 | `IDP_SANDBOX_RUNTIME_CLASS` | Kubernetes：RuntimeClass | 无 |
-| `IDP_SANDBOX_EGRESS_PROXY` / `_EGRESS_PORT` | 出口代理容器名与端口；设了才有 `network: egress` | 关 |
+| `IDP_SANDBOX_EGRESS_PROXY` / `_EGRESS_PORT` | 出口代理与端口；设了才有 `network: egress`。Docker 后端是代理的容器名；Kubernetes 后端是代理 Service 的 DNS 名（或 cluster IP），服务每次运行前解析它 | 关 |
 | `IDP_SANDBOX_EGRESS_KEY_FILE` | 与出口代理共用的密钥文件（至少 32 字节，如 `openssl rand -hex 32`）；设了之后每次运行的代理地址里带着说明调用者租户的凭据（ADR-0001 D21） | 不设：所有运行用同一张白名单 |
 | `IDP_SANDBOX_NAMESPACE` / `_STORAGE_CLASS` / `_OWNER` | Kubernetes 后端的命名空间、存储类、清扫标签 | Pod 自己的命名空间 / 集群默认 / `default` |
 
@@ -66,6 +66,23 @@ tenants:
 - 两边要一起配：代理有密钥而服务没有，所有出口请求都是 407；服务有密钥而代理没有，代理不看凭据，所有租户仍用同一张名单。只配了租户文件没配密钥，代理不启动。
 - 租户取自网关转发的调用者，所以应同时配 `IDP_SANDBOX_CALLER_KEYS_FILE`（D18），否则租户可以被伪造。
 - 轮换密钥：两边换成新文件后先重启代理、再重启服务；中间那一小段时间里新的出口运行会得到 407。
+
+**Kubernetes 上启用出口（ADR-0001 D22）**：
+
+```bash
+# 1. 服务与代理共用的密钥（不在仓库里）
+kubectl apply -f deploy/kubernetes/namespace.yaml
+kubectl -n idp-sandbox create secret generic idp-sandbox-egress-key --from-literal=egress.key="$(openssl rand -hex 32)"
+# 2. 在 deploy/kubernetes-egress/tenants.yaml 里列主机（发布时为空：什么都不放行），把两个镜像摘要和 API 服务器的 ipBlock 换成真实值
+# 3. 代替 deploy/kubernetes 应用这一层
+kubectl apply -k deploy/kubernetes-egress
+```
+
+- 运行 Pod 没有 DNS，也不需要：服务把代理的 cluster IP 写进 `HTTP_PROXY` / `HTTPS_PROXY`，主机名由代理解析。代码里自己解析主机名会失败，这是预期的。
+- 名单里用了 443 / 80 之外的端口，代理的 NetworkPolicy（`deploy/kubernetes-egress/networkpolicy.yaml` 里的 `egress-proxy`）也要加上；集群的 Pod、Service、节点网段若不在它排除的私网段里，要加进 `except`。
+- 改 `tenants.yaml` 后重新 `kubectl apply -k`：ConfigMap 换了名字，代理滚动重启，正在进行的连接会断。轮换密钥：更新 Secret 后先 `kubectl -n idp-sandbox rollout restart deploy/idp-sandbox-egress`，再重启 `deploy/idp-sandbox`。
+- 服务启动时多探测一次：与出口运行同标签的 Pod 不应连得上 API 服务器（连得上就不启动，说明有策略把出口运行放得太宽），应当连得上代理（连不上只告警）。看日志里的 `run pods with network=egress reach the egress proxy and not the API server`。
+- 验证：`bash tests/kind/egress.sh`（kind + Calico；会把测试名单和 `IDP_EGRESS_ALLOW_PRIVATE` 留在集群上，只用于测试集群）。
 
 ## 4. 部署与检查
 
@@ -100,6 +117,9 @@ Kubernetes：`kubectl apply -k deploy/kubernetes`（先把镜像摘要、API 服
 | `the sandbox is at capacity` | 并发或总数上限 | 稍后重试；调大 `_MAX_CONCURRENT` / `_MAX_WORKSPACES` |
 | `you already hold the maximum number of workspaces` | 每个调用者的上限 | `sandbox_delete` 一个 |
 | `network access is not enabled` | 没配出口代理 | 配代理并重新发布 Release（schema 会变）|
+| 服务不启动：`reached … lets them reach more than the egress proxy`（Kubernetes）| 运行命名空间里有策略把带 `idp.sandbox/network=egress` 的 Pod 放到了代理之外 | `kubectl -n idp-sandbox-runs get networkpolicy`，删掉或收紧多出来的那条 |
+| 日志告警 `did not reach the egress proxy`，出口运行全部连接失败（Kubernetes）| 代理没起来（Secret `idp-sandbox-egress-key` 不存在时 Pod 停在 `ContainerCreating`）、Service 名解析不到，或 CNI 没按 Pod 选择器放行 | 建 Secret；核对 `IDP_SANDBOX_EGRESS_PROXY`；代理就绪后重启服务再看探测结果 |
+| 出口运行里解析主机名失败（Kubernetes）| 运行 Pod 没有 DNS，这是设计 | 用读 `HTTP_PROXY` / `HTTPS_PROXY` 的客户端，让代理去解析 |
 | 出口请求全是 407 | 代理有 `IDP_EGRESS_KEY_FILE`，服务没有 `IDP_SANDBOX_EGRESS_KEY_FILE`，或两边的密钥不是同一个；也可能是代码自己拼了不带凭据的代理地址 | 两边用同一个密钥文件；代码用环境里的 `HTTP_PROXY` / `HTTPS_PROXY` |
 | 某个租户到不了默认名单里的主机 | 它在 `IDP_EGRESS_TENANTS_FILE` 里被列出：列出的租户只用自己的名单 | 把需要的主机加进它自己的名单 |
 | 运行总是 `timed out` | 代码慢，或在 gVisor 下系统调用密集 | 调大 `_TIMEOUT_S`（上限）；评估运行时的开销 |
@@ -119,5 +139,5 @@ Kubernetes：`kubectl apply -k deploy/kubernetes`（先把镜像摘要、API 服
 - 默认运行时（runc）与宿主共享内核：对真正不可信的代码，上 gVisor 或 Kata，并保留全部其他层（无网络、限额、非 root、无令牌、按调用者隔离）。
 - 身份这一跳的签名要配置：给网关一把 P-256 私钥（`IDP_GATEWAY_CALLER_KEY_FILE`），把公钥给沙箱（`IDP_SANDBOX_CALLER_KEYS_FILE`），并告诉沙箱它在 idp-mcp 里登记的端点（`IDP_SANDBOX_CALLER_AUDIENCE`，要与登记的 URL 逐字相同）。生成：`openssl ecparam -name prime256v1 -genkey -noout -out caller.key && openssl ec -in caller.key -pubout -out caller.pub`。换钥匙时先把新公钥追加进沙箱的文件并重启沙箱，再换网关的私钥，最后删掉旧公钥。没配时，只有网关能到达沙箱的网络策略就是边界，不要把 8570 暴露给别人；配了也保留这条网络策略。
 - Docker 后端要 Docker 套接字：专用节点、虚拟机或 rootless 引擎，不要和别的服务共用。
-- 出口白名单按主机名，可以按租户分（D21），不按人或角色分；能上传的主机会成为外传通道。
+- 出口白名单按主机名，可以按租户分（D21），不按人或角色分；能上传的主机会成为外传通道。Kubernetes 上的出口（D22）只在 kind + Calico 上测过，没有真实的公网流量走过，边界见 ADR 第 5 节。
 - 加固运行时的实测数据和限制见 ADR 第 5 节。

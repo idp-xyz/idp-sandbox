@@ -1,0 +1,28 @@
+# The sandbox service: where the proxy is, and the key it signs the runs' credentials with.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: idp-sandbox
+  namespace: idp-sandbox
+spec:
+  template:
+    spec:
+      containers:
+        - name: sandbox
+          env:
+            # resolved by the service for every run: a run pod has no DNS and is told the Service's cluster IP
+            - name: IDP_SANDBOX_EGRESS_PROXY
+              value: idp-sandbox-egress.idp-sandbox.svc.cluster.local
+            - name: IDP_SANDBOX_EGRESS_PORT
+              value: "3128"
+            - name: IDP_SANDBOX_EGRESS_KEY_FILE
+              value: /etc/idp/egress/egress.key
+          volumeMounts:
+            - name: egress-key
+              mountPath: /etc/idp/egress
+              readOnly: true
+      volumes:
+        - name: egress-key
+          secret:
+            secretName: idp-sandbox-egress-key
+            defaultMode: 0444          # read by the service's unprivileged user; the pod has one container

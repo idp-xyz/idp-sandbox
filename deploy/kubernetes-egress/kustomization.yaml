@@ -1,0 +1,29 @@
+# deploy/kubernetes plus the egress proxy (ADR-0001 D13, D21, D22): runs may ask for network=egress and then reach the
+# hosts listed in tenants.yaml through the proxy, and nothing else. Without this overlay no run has any network.
+#
+# Before applying, create the key the sandbox service and the proxy share (it is not in this directory on purpose):
+#   kubectl -n idp-sandbox create secret generic idp-sandbox-egress-key --from-literal=egress.key="$(openssl rand -hex 32)"
+# and list the hosts in tenants.yaml (as shipped it allows none).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../kubernetes
+  - egress.yaml
+  - networkpolicy.yaml
+configMapGenerator:
+  - name: idp-sandbox-egress-tenants
+    namespace: idp-sandbox
+    files:
+      - tenants.yaml
+    # the name carries a hash of the content, so changing the lists restarts the proxy with them
+patches:
+  - path: sandbox-patch.yaml
+labels:
+  - pairs:
+      app.kubernetes.io/name: idp-sandbox
+      app.kubernetes.io/part-of: idp-telos
+    includeTemplates: true
+images:
+  - name: idp-sandbox-egress
+    newName: registry.example.com/idp/idp-sandbox-egress   # the image built by deploy/build-egress.sh, pinned by digest
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000

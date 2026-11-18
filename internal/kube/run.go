@@ -257,6 +257,13 @@ func (k *Kube) Run(ctx context.Context, spec sandbox.RunSpec) (sandbox.RunResult
 	if timeout <= 0 {
 		timeout = spec.Limits.Timeout
 	}
-	return k.execute(ctx, jobSpec{role: "run", workspace: spec.Workspace, image: spec.Image, userCmd: spec.Cmd,
-		input: spec.Stdin, limits: spec.Limits}, timeout)
+	js := jobSpec{role: "run", workspace: spec.Workspace, image: spec.Image, userCmd: spec.Cmd, input: spec.Stdin, limits: spec.Limits}
+	if spec.Egress {
+		proxy, err := k.proxyURL(ctx, spec, timeout)
+		if err != nil {
+			return sandbox.RunResult{}, err
+		}
+		js.egress, js.proxy = true, proxy
+	}
+	return k.execute(ctx, js, timeout)
 }

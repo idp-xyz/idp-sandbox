@@ -1,0 +1,9 @@
+# The egress proxy's allow-lists (internal/egress/tenants.go, ADR-0001 D21). A tenant named under `tenants` gets its own
+# list and nothing of the default one; every other caller gets `default`. Ports left out are 443 and 80; a port listed
+# here must also be let out by the proxy's NetworkPolicy (networkpolicy.yaml). List read-only sources only: a host that
+# takes uploads is a way to carry a workspace's data out.
+default:
+  hosts: []          # nothing, until the operator lists hosts
+# tenants:
+#   7b0c0a52-0000-0000-0000-000000000000:      # the tenant id as the gateway forwards it
+#     hosts: [pypi.org, files.pythonhosted.org]
