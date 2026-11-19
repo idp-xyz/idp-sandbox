@@ -23,7 +23,7 @@ ARGS="\"--platform=$PLATFORM\""; NESTED=""
 printf '{"runtimes":{"runsc":{"path":"/usr/local/bin/runsc","runtimeArgs":[%s]}},"storage-driver":"overlay2"}\n' "$ARGS" > "$T/seed/daemon.json"
 # docker:dind: from the daemon if it can pull, else with crane through the shell's proxy (a daemon that cannot reach Docker Hub)
 if ! docker image inspect docker:dind >/dev/null 2>&1; then
-  docker pull -q docker:dind >/dev/null 2>&1 || { command -v crane >/dev/null || { echo "need docker:dind (docker pull, or install crane)" >&2; exit 2; }
+  bash deploy/pull-image.sh docker:dind >/dev/null 2>&1 || { command -v crane >/dev/null || { echo "need docker:dind (docker pull, or install crane)" >&2; exit 2; }
     crane pull --format=tarball docker:dind "$T/dind.tar" && docker load -i "$T/dind.tar" >/dev/null; }
 fi
 docker rm -f sbx-dind >/dev/null 2>&1 || true

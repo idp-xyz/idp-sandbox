@@ -40,6 +40,10 @@ done
 "${C[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
 cleanup() { [[ "${KEEP:-0}" == 1 ]] || { "${C[@]}" down -v --remove-orphans >/dev/null 2>&1; docker ps -aq --filter label=idp.sandbox=e2e | xargs -r docker rm -fv >/dev/null; docker volume ls -q --filter label=idp.sandbox=e2e | xargs -r docker volume rm -f >/dev/null; }; }
 trap cleanup EXIT
+# the third-party images: PostgreSQL (named by the compose file) and the runtime images the sandbox starts and the checks below run
+# (the sandbox never pulls them itself), pulled here with retries so that neither compose nor docker run has to
+mapfile -t THIRD < <("${C[@]}" config --images postgres)
+bash deploy/pull-image.sh "${THIRD[@]}" "${IDP_SANDBOX_PYTHON_IMAGE:-public.ecr.aws/docker/library/python:3.12-slim}" "${IDP_SANDBOX_SHELL_IMAGE:-public.ecr.aws/docker/library/alpine:3.22}"
 "${C[@]}" up -d --wait postgres sandbox
 "${C[@]}" run --rm -T registry-admin migrate
 "${C[@]}" run --rm -T registry-admin ensure-login idp_mcp_svc

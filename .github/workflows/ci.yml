@@ -29,7 +29,9 @@ jobs:
       - name: Image builds
         run: bash deploy/build.sh idp-sandbox:ci
       - name: Image vulnerabilities (trivy, HIGH and CRITICAL with a fix fail the build)
-        run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/aquasecurity/trivy:0.76.2 image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 idp-sandbox:ci
+        run: |
+          bash deploy/pull-image.sh ghcr.io/aquasecurity/trivy:0.76.2
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/aquasecurity/trivy:0.76.2 image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 idp-sandbox:ci
 
   kubernetes:
     name: the Kubernetes backend on kind

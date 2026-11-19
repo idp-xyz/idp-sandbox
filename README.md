@@ -35,6 +35,8 @@ bash deploy/e2e.sh      # 经真实的 idp-mcp 网关：注册、评审、授权
 bash deploy/build.sh    # 镜像（scratch）
 ```
 
+CI、`make images` 与 `deploy/e2e.sh` 里的第三方镜像（python、alpine、PostgreSQL、trivy、docker:dind）先由 `deploy/pull-image.sh` 显式拉取并重试（最多 5 次，间隔 15、30、60、120 秒；本机已有则跳过），因为公共 registry 对匿名拉取按来源地址限流，而 CI 的 runner 与许多项目共用地址。
+
 运行：`IDP_SANDBOX_LISTEN=127.0.0.1:8570 ./bin/idp-sandbox`（配置项见 `cmd/idp-sandbox/main.go` 文件头）。绑定非回环地址必须设置 `IDP_SANDBOX_PRIVATE_NETWORK=true`：服务器自己没有认证，只有网关能到达它。
 
 ## Kubernetes 后端

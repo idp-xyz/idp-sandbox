@@ -17,8 +17,7 @@ office-image:
 	bash deploy/office/build.sh
 
 images:
-	docker pull public.ecr.aws/docker/library/python:3.12-slim
-	docker pull public.ecr.aws/docker/library/alpine:3.22
+	bash deploy/pull-image.sh public.ecr.aws/docker/library/python:3.12-slim public.ecr.aws/docker/library/alpine:3.22
 
 # Needs a Docker daemon and the python:3.12-slim and alpine:3.22 images (public.ecr.aws mirrors by default;
 # IDP_SANDBOX_PYTHON_IMAGE / IDP_SANDBOX_SHELL_IMAGE override). Tries to escape the sandbox, for real.
