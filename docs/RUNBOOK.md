@@ -9,6 +9,7 @@
 - 在 idp-mcp 里必须以 `identity: forward` 注册（`POST /api/v1/servers`，`"identity":"forward"`，注册后不可改）；否则每个请求都被拒绝（`the request carries no caller identity`）。
 - 工具：`sandbox_create`、`sandbox_run`（`python` / `shell`）、`sandbox_write_file`、`sandbox_read_file`、`sandbox_list_files`、`sandbox_delete`。经网关时带目标名前缀（`sandbox__sandbox_run`）。
 - 工具的 schema 变了（例如启用出口、改限额，或升级到 `language` 的说明有变化的版本：ADR-0001 D16、D17 在 `office` 的说明里加了 `sheetskel`、`pdftext`、`md2pdf`）→ 网关钉住的目录会漂移，要对服务器重新 `discover`、评审、重新发布 Release。只换 office 运行镜像不改 schema，不需要这一步。
+- 启用出口还会把 `sandbox_run` 的注解 `openWorldHint` 从 `false` 改成 `true`（平台 ADR-0003 D7：能连外面就如实说能连外面）。注解也在钉住的目录里：idp-mcp 的 `federation.NormalizeTools` 保留工具的每个字段（含 `annotations`），Release 的快照摘要和网关的漂移检查（`CheckDrift`，默认每分钟一次）都用同一份规范化后的目录算摘要，`TestDigestChangesWhenMeaningChanges` 就覆盖了注解变化会改摘要。所以只改注解与改 schema 一样：网关会报 `DRIFTED`，`driftAction` 为默认的 `block` 时对该服务器的所有调用被拒绝。运维要做的：先对服务器 `POST /api/v1/servers/{id}/discover` 重新发现，评审新旧快照的差别（这里应当只有 `network` 枚举与 `openWorldHint`），再发布新的 Release；在 Release 生效前这个服务器处于封锁状态，服务一滚动、Release 还没换，两边就不一致，所以启用出口要和重新发现、发布 Release 排在同一个窗口里（`driftAction: report` 的网关只报告不封锁）。反过来关闭出口也一样。
 
 ## 2. 两种后端
 

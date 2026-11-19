@@ -220,6 +220,29 @@ func TestNetworkParameterFollowsTheOperatorsConfiguration(t *testing.T) {
 	}
 }
 
+// sandbox_run tells the gateway and the model that it can reach the outside exactly when it can (platform ADR-0003 D7);
+// every other tool never can.
+func TestRunIsOpenWorldOnlyWhenEgressIsOffered(t *testing.T) {
+	for _, egress := range []bool{false, true} {
+		cfg := sandbox.DefaultConfig("py", "sh")
+		cfg.EgressEnabled = egress
+		m, _ := sandbox.New(context.Background(), cfg, &fake{files: map[string][]byte{}}, slog.New(slog.DiscardHandler))
+		var run bool
+		for _, tool := range New(m, slog.New(slog.DiscardHandler), nometrics{}) {
+			want := false
+			if tool.Name == "sandbox_run" {
+				run, want = true, egress
+			}
+			if got := tool.Annotations["openWorldHint"]; got != want {
+				t.Errorf("egress %v: %s has openWorldHint %v, want %v", egress, tool.Name, got, want)
+			}
+		}
+		if !run {
+			t.Fatal("no sandbox_run")
+		}
+	}
+}
+
 // The office run profile (ADR-0001 D14) is offered only when the operator configured its image, and the schema says what each
 // language is, so the model can pick the right one.
 func TestOfficeLanguageFollowsTheOperatorsConfiguration(t *testing.T) {

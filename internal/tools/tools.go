@@ -140,7 +140,9 @@ func NewWithFiles(m *sandbox.Manager, log *slog.Logger, met Metrics, fc *files.C
 				"timeoutSeconds": map[string]any{"type": "integer", "minimum": 1, "maximum": int(cfg.Limits.Timeout.Seconds())},
 				"network":        map[string]any{"type": "string", "enum": networks, "description": networkDescription},
 			}, "workspaceId", "language", "code"),
-			Annotations: map[string]any{"readOnlyHint": false, "destructiveHint": false, "openWorldHint": false},
+			// With egress offered a run can reach hosts outside the sandbox, so the tool says it deals with the open world
+			// (platform ADR-0003 D7). Changing it changes the pinned catalog: docs/RUNBOOK.md section 1.
+			Annotations: map[string]any{"readOnlyHint": false, "destructiveHint": false, "openWorldHint": cfg.EgressEnabled},
 			Call: a.wrap("sandbox_run", func(ctx context.Context, owner string, args map[string]json.RawMessage) (mcp.Result, string) {
 				var in struct {
 					WorkspaceID    string `json:"workspaceId"`
