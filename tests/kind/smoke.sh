@@ -32,6 +32,14 @@ kubectl apply -f .local-kind.yaml >/dev/null
 trap 'kubectl -n idp-sandbox logs deploy/idp-sandbox --tail 60 || true; kubectl -n idp-sandbox-runs get all,pvc,networkpolicy || true; kill $PF 2>/dev/null || true' EXIT
 kubectl -n idp-sandbox rollout status deploy/idp-sandbox --timeout=180s
 kubectl -n idp-sandbox port-forward svc/idp-sandbox 8570:8570 >/dev/null 2>&1 & PF=$!
-for _ in $(seq 1 30); do curl -sf -o /dev/null --noproxy '*' -X POST http://127.0.0.1:8570/mcp && break; sleep 1; done
+# ready when a well-formed tools/list answers 200 (it needs no caller). The bodiless POST this replaces was always
+# answered with 400, so curl -f never succeeded and the loop slept its full 30 seconds.
+READY=""
+for _ in $(seq 1 30); do
+  curl -sf -o /dev/null --noproxy '*' -X POST http://127.0.0.1:8570/mcp -H 'Content-Type: application/json' -H 'MCP-Protocol-Version: 2026-07-28' -H 'Mcp-Method: tools/list' \
+    --data '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}' && { READY=1; break; }
+  sleep 1
+done
+[[ -n "$READY" ]] || { echo "FAIL: idp-sandbox did not answer tools/list on 127.0.0.1:8570 within 30 seconds" >&2; exit 1; }
 # cluster IPs, not names: a blocked DNS lookup would hang the probe past the run's time limit
 API_IP="$(kubectl get svc kubernetes -o jsonpath='{.spec.clusterIP}')" SANDBOX_IP="$(kubectl -n idp-sandbox get svc idp-sandbox -o jsonpath='{.spec.clusterIP}')" python3 tests/kind/check.py

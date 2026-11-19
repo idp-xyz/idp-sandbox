@@ -21,6 +21,18 @@ func post(t *testing.T, s *Server, headers map[string]string, body string) (*htt
 	for k, v := range headers {
 		r.Header.Set(k, v)
 	}
+	// Mcp-Method is required: unless a test names it (an empty value sends none), it is the body's own method, as every
+	// real client sends it.
+	if _, named := headers["Mcp-Method"]; !named {
+		var b struct{ Method string }
+		_ = json.Unmarshal([]byte(body), &b)
+		if b.Method != "" {
+			r.Header.Set("Mcp-Method", b.Method)
+		}
+	}
+	if r.Header.Get("Mcp-Method") == "" {
+		r.Header.Del("Mcp-Method")
+	}
 	w := httptest.NewRecorder()
 	s.ServeHTTP(w, r)
 	var m map[string]any
@@ -75,6 +87,9 @@ func TestAdmissionRules(t *testing.T) {
 		{"batch", ok, `[{"jsonrpc":"2.0","id":1,"method":"tools/list"}]`, 400, CodeInvalidRequest},
 		{"garbage", ok, `{`, 400, CodeParse},
 		{"method header mismatch", map[string]string{"MCP-Protocol-Version": ProtocolVersion, "Mcp-Method": "tools/call"}, `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{` + meta + `}}`, 400, CodeMismatch},
+		{"no method header", map[string]string{"MCP-Protocol-Version": ProtocolVersion, "Mcp-Method": ""}, `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{` + meta + `}}`, 400, CodeMismatch},
+		{"no method header on a notification", map[string]string{"MCP-Protocol-Version": ProtocolVersion, "Mcp-Method": ""}, `{"jsonrpc":"2.0","method":"notifications/cancelled","params":{}}`, 400, CodeMismatch},
+		{"no version header and no method header", map[string]string{"Mcp-Method": ""}, `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{` + meta + `}}`, 400, CodeUnsupported},
 		{"no _meta", ok, `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`, 400, CodeInvalidParams},
 		{"body version differs", ok, `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2025-06-18","io.modelcontextprotocol/clientCapabilities":{}}}}`, 400, CodeMismatch},
 		{"no capabilities", ok, `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}`, 400, CodeInvalidParams},
@@ -88,6 +103,34 @@ func TestAdmissionRules(t *testing.T) {
 		if w.Code != c.status || e == nil || e["code"] != c.code {
 			t.Errorf("%s: %d %v", c.name, w.Code, m)
 		}
+	}
+}
+
+func TestTheMethodHeaderIsRequiredAndMustMatchTheBody(t *testing.T) {
+	body := `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{` + meta + `}}`
+	h := func(method string) map[string]string {
+		return map[string]string{"MCP-Protocol-Version": ProtocolVersion, "Mcp-Method": method}
+	}
+	w, m := post(t, echo(), h(""), body)
+	e, _ := m["error"].(map[string]any)
+	if w.Code != 400 || e == nil || e["code"] != float64(CodeMismatch) || !strings.Contains(e["message"].(string), "required") {
+		t.Fatalf("without the header: %d %v", w.Code, m)
+	}
+	w, m = post(t, echo(), h("tools/call"), body)
+	e, _ = m["error"].(map[string]any)
+	if w.Code != 400 || e == nil || e["code"] != float64(CodeMismatch) || !strings.Contains(e["message"].(string), "does not match") {
+		t.Fatalf("with another method: %d %v", w.Code, m)
+	}
+	if w, m = post(t, echo(), h("tools/list"), body); w.Code != 200 || m["result"] == nil {
+		t.Fatalf("with the matching header: %d %v", w.Code, m)
+	}
+	// a notification has no response body but is not exempt
+	note := `{"jsonrpc":"2.0","method":"notifications/cancelled","params":{}}`
+	if w, _ = post(t, echo(), h(""), note); w.Code != 400 {
+		t.Fatalf("a notification without the header: %d", w.Code)
+	}
+	if w, _ = post(t, echo(), h("notifications/cancelled"), note); w.Code != 202 {
+		t.Fatalf("a notification with the header: %d", w.Code)
 	}
 }
 

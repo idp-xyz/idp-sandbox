@@ -71,6 +71,7 @@ func callAs(t *testing.T, ts *httptest.Server, subject, tool string, args map[st
 	b, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{"name": tool, "arguments": args, "_meta": meta}})
 	req, _ := http.NewRequest(http.MethodPost, ts.URL, strings.NewReader(string(b)))
 	req.Header.Set("MCP-Protocol-Version", "2026-07-28")
+	req.Header.Set("Mcp-Method", "tools/call")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)

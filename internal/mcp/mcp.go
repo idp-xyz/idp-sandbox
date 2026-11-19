@@ -188,7 +188,17 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			map[string]any{"supported": []string{ProtocolVersion}}})
 		return
 	}
-	if m := r.Header.Get("Mcp-Method"); m != "" && m != req.Method {
+	// The header is required on every request, notifications included (2026-07-28 transport; idp-mcp ADR-0001 D12 made
+	// the gateway require it): checked only when present, a client could send a body method the routing headers do not
+	// show. It comes after the protocol-version check, as in the gateway, so a client of another revision is told the
+	// revision is unsupported, not that a header of this one is missing; and before the notification return, so those
+	// are not exempt.
+	m := r.Header.Get("Mcp-Method")
+	if m == "" {
+		write(w, 400, id, nil, &Error{CodeMismatch, "Mcp-Method header is required", nil})
+		return
+	}
+	if m != req.Method {
 		write(w, 400, id, nil, &Error{CodeMismatch, "Mcp-Method header does not match the body method", nil})
 		return
 	}
