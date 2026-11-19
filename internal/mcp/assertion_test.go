@@ -75,35 +75,6 @@ func TestTheGatewaysAssertionIsAccepted(t *testing.T) {
 	}
 }
 
-func TestAnAssertionIsRefusedForAnotherRequestServerOrTime(t *testing.T) {
-	other := strings.Replace(vectorParams, "print(", "exfiltrate(", 1)
-	if _, err := vectorVerifier(t).Verify(vectorAssertion, "tools/call", params(t, other)); err == nil || !strings.Contains(err.Error(), "another request") {
-		t.Fatalf("other arguments: %v", err)
-	}
-	otherTool := strings.Replace(vectorParams, "sandbox_run", "sandbox_delete", 1)
-	if _, err := vectorVerifier(t).Verify(vectorAssertion, "tools/call", params(t, otherTool)); err == nil {
-		t.Fatal("another tool was accepted")
-	}
-	if _, err := vectorVerifier(t).Verify(vectorAssertion, "resources/read", params(t, vectorParams)); err == nil {
-		t.Fatal("another method was accepted")
-	}
-	elsewhere, _ := NewCallerVerifier([]byte(vectorKey), "http://another-server:9000/mcp")
-	elsewhere.now = func() time.Time { return vectorTime }
-	if _, err := elsewhere.Verify(vectorAssertion, "tools/call", params(t, vectorParams)); err == nil || !strings.Contains(err.Error(), "made for") {
-		t.Fatalf("another audience: %v", err)
-	}
-	late := vectorVerifier(t)
-	late.now = func() time.Time { return vectorTime.Add(2 * time.Minute) }
-	if _, err := late.Verify(vectorAssertion, "tools/call", params(t, vectorParams)); err == nil || !strings.Contains(err.Error(), "expired") {
-		t.Fatalf("after its minute: %v", err)
-	}
-	early := vectorVerifier(t)
-	early.now = func() time.Time { return vectorTime.Add(-5 * time.Minute) }
-	if _, err := early.Verify(vectorAssertion, "tools/call", params(t, vectorParams)); err == nil || !strings.Contains(err.Error(), "future") {
-		t.Fatalf("before it was made: %v", err)
-	}
-}
-
 // forge makes an assertion with a key of the test's own: what someone on the sandbox's network could do.
 func forge(t *testing.T, key *ecdsa.PrivateKey, header, claims map[string]any) string {
 	t.Helper()

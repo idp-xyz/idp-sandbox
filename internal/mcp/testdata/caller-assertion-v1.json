@@ -1,0 +1,1676 @@
+{
+  "format": "idp.telos.caller-assertion-vectors/v1",
+  "generatedBy": "go test ./internal/gateway -run TestCallerVectors -update (idp-mcp)",
+  "audience": "http://sandbox:8570/mcp",
+  "keys": [
+    {
+      "name": "gateway",
+      "kid": "URpxnLpKWqClVqWJTGz0Mz8zxKGc19-a4A2WF912Di8",
+      "pem": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEKUt4DlyGfR//qYDYjlumDW2G+j5i\n2vmyJH5RrVQ6Gugx3JJrRRYBq8EJFzMtlTuor9khezj91zGGmVVqtZeuxA==\n-----END PUBLIC KEY-----\n"
+    },
+    {
+      "name": "gateway-next",
+      "kid": "l_3RcYIoGTNkYLcbHhztxeRsVtGH9fzSaTZP_bq3Pm0",
+      "pem": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE0+7+WTlpTNX8jSpCG8Ci1j+1S/UH\n6H2o/0Aoi3ZdnQeWaJReH4pOnC2kXaK8zWjbp1ZW465jpdTLKIBCm3dTug==\n-----END PUBLIC KEY-----\n"
+    }
+  ],
+  "cases": [
+    {
+      "name": "good",
+      "description": "The assertion the gateway signs for a forwarded call, presented twenty seconds later.",
+      "origin": "gateway",
+      "steps": [
+        {
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.idp.telos/caller": {
+                "subject": "svc-operator",
+                "tenant": "t1",
+                "roles": [
+                  "operator"
+                ],
+                "client": "idp-host",
+                "actor": "idp-host"
+              },
+              "io.idp.telos/caller-assertion": "eyJhbGciOiJFUzI1NiIsImtpZCI6IlVScHhuTHBLV3FDbFZxV0pUR3owTXo4enhLR2MxOS1hNEEyV0Y5MTJEaTgiLCJ0eXAiOiJpZHAtY2FsbGVyK2p3dCJ9.eyJhY3RvciI6ImlkcC1ob3N0IiwiYXVkIjoiaHR0cDovL3NhbmRib3g6ODU3MC9tY3AiLCJjbGllbnQiOiJpZHAtaG9zdCIsImV4cCI6MTc5NTA4OTY2MCwiaWF0IjoxNzk1MDg5NjAwLCJpc3MiOiJpZHAtbWNwLWdhdGV3YXk6ZzEiLCJqdGkiOiJyd3dRSWREdXkzTGpwWjFsIiwicmVxIjoic2hhMjU2Ojg4NTFiNDQ1MTliNmMwNDgwODhiZmQ2NjA5MDU4MWI0MzNiNzQ4OTI1NzUwMWJiMmE5MWUxN2UwZTg0YTViMzMiLCJyb2xlcyI6WyJvcGVyYXRvciJdLCJzdWIiOiJzdmMtb3BlcmF0b3IiLCJ0ZW5hbnRfaWQiOiJ0MSJ9.h_pbh8oz2ZCJ-JeHVP9GI8QNPVWjfreCvQap2Olsxjke5AadNQh0zcl-tMmPw56w70ey4q32EHnUE2cOKIUkzg",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+            },
+            "arguments": {
+              "workspaceId": "0123456789abcdef0123456789abcdef",
+              "language": "python",
+              "code": "print('\u003ca\u003e \u0026 é')",
+              "timeoutSeconds": 5.0
+            },
+            "name": "sandbox_run"
+          },
+          "now": "2026-11-19T12:00:20Z",
+          "expect": {
+            "outcome": "accept",
+            "caller": {
+              "subject": "svc-operator",
+              "tenant": "t1",
+              "roles": [
+                "operator"
+              ],
+              "client": "idp-host",
+              "actor": "idp-host"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "good-params-spelled-differently",
+      "description": "The digest is of the JSON value, not of its bytes: the same request with other spacing, key order and string escapes is accepted.",
+      "origin": "gateway",
+      "steps": [
+        {
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.idp.telos/caller": {
+                "subject": "svc-operator",
+                "tenant": "t1",
+                "roles": [
+                  "operator"
+                ],
+                "client": "idp-host",
+                "actor": "idp-host"
+              },
+              "io.idp.telos/caller-assertion": "eyJhbGciOiJFUzI1NiIsImtpZCI6IlVScHhuTHBLV3FDbFZxV0pUR3owTXo4enhLR2MxOS1hNEEyV0Y5MTJEaTgiLCJ0eXAiOiJpZHAtY2FsbGVyK2p3dCJ9.eyJhY3RvciI6ImlkcC1ob3N0IiwiYXVkIjoiaHR0cDovL3NhbmRib3g6ODU3MC9tY3AiLCJjbGllbnQiOiJpZHAtaG9zdCIsImV4cCI6MTc5NTA4OTY2MCwiaWF0IjoxNzk1MDg5NjAwLCJpc3MiOiJpZHAtbWNwLWdhdGV3YXk6ZzEiLCJqdGkiOiJyd3dRSWREdXkzTGpwWjFsIiwicmVxIjoic2hhMjU2Ojg4NTFiNDQ1MTliNmMwNDgwODhiZmQ2NjA5MDU4MWI0MzNiNzQ4OTI1NzUwMWJiMmE5MWUxN2UwZTg0YTViMzMiLCJyb2xlcyI6WyJvcGVyYXRvciJdLCJzdWIiOiJzdmMtb3BlcmF0b3IiLCJ0ZW5hbnRfaWQiOiJ0MSJ9.h_pbh8oz2ZCJ-JeHVP9GI8QNPVWjfreCvQap2Olsxjke5AadNQh0zcl-tMmPw56w70ey4q32EHnUE2cOKIUkzg",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+            },
+            "arguments": {
+              "timeoutSeconds": 5.0,
+              "code": "print('\u003ca\u003e \u0026 é')",
+              "language": "python",
+              "workspaceId": "0123456789abcdef0123456789abcdef"
+            },
+            "name": "sandbox_run"
+          },
+          "now": "2026-11-19T12:00:20Z",
+          "expect": {
+            "outcome": "accept",
+            "caller": {
+              "subject": "svc-operator",
+              "tenant": "t1",
+              "roles": [
+                "operator"
+              ],
+              "client": "idp-host",
+              "actor": "idp-host"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "good-without-roles-client-and-actor",
+      "description": "A caller with no roles, no client and no actor: roles is an empty list, client and actor are empty.",
+      "origin": "gateway",
+      "steps": [
+        {
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.idp.telos/caller": {
+                "subject": "svc-bare",
+                "tenant": "t2",
+                "roles": []
+              },
+              "io.idp.telos/caller-assertion": "eyJhbGciOiJFUzI1NiIsImtpZCI6IlVScHhuTHBLV3FDbFZxV0pUR3owTXo4enhLR2MxOS1hNEEyV0Y5MTJEaTgiLCJ0eXAiOiJpZHAtY2FsbGVyK2p3dCJ9.eyJhdWQiOiJodHRwOi8vc2FuZGJveDo4NTcwL21jcCIsImV4cCI6MTc5NTA4OTY2MCwiaWF0IjoxNzk1MDg5NjAwLCJpc3MiOiJpZHAtbWNwLWdhdGV3YXk6ZzEiLCJqdGkiOiI4VU0yQjRuWHlnR3p0aGp3IiwicmVxIjoic2hhMjU2Ojg4NTFiNDQ1MTliNmMwNDgwODhiZmQ2NjA5MDU4MWI0MzNiNzQ4OTI1NzUwMWJiMmE5MWUxN2UwZTg0YTViMzMiLCJyb2xlcyI6W10sInN1YiI6InN2Yy1iYXJlIiwidGVuYW50X2lkIjoidDIifQ.u5KuiXmhgX6zXImD4_zNdTF8Ftlnf3hX8Q2-sp7PzrAf-bQD8m5xYBX53bKwCsTfucIqKTreVm-1_Ho7bQX0ag",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+            },
+            "arguments": {
+              "workspaceId": "0123456789abcdef0123456789abcdef",
+              "language": "python",
+              "code": "print('\u003ca\u003e \u0026 é')",
+              "timeoutSeconds": 5.0
+            },
+            "name": "sandbox_run"
+          },
+          "now": "2026-11-19T12:00:20Z",
+          "expect": {
+            "outcome": "accept",
+            "caller": {
+              "subject": "svc-bare",
+              "tenant": "t2",
+              "roles": [],
+              "client": "",
+              "actor": ""
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "good-signed-with-the-second-key",
+      "description": "A verifier holding both keys (one is being rotated out) accepts an assertion of either, chosen by kid.",
+      "origin": "gateway",
+      "steps": [
+        {
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.idp.telos/caller": {
+                "subject": "svc-operator",
+                "tenant": "t1",
+                "roles": [
+                  "operator"
+                ],
+                "client": "idp-host",
+                "actor": "idp-host"
+              },
+              "io.idp.telos/caller-assertion": "eyJhbGciOiJFUzI1NiIsImtpZCI6ImxfM1JjWUlvR1ROa1lMY2JIaHp0eGVSc1Z0R0g5ZnpTYVRaUF9icTNQbTAiLCJ0eXAiOiJpZHAtY2FsbGVyK2p3dCJ9.eyJhY3RvciI6ImlkcC1ob3N0IiwiYXVkIjoiaHR0cDovL3NhbmRib3g6ODU3MC9tY3AiLCJjbGllbnQiOiJpZHAtaG9zdCIsImV4cCI6MTc5NTA4OTY2MCwiaWF0IjoxNzk1MDg5NjAwLCJpc3MiOiJpZHAtbWNwLWdhdGV3YXk6ZzEiLCJqdGkiOiJWeVM3UkR2amV0T0M2NlBkIiwicmVxIjoic2hhMjU2Ojg4NTFiNDQ1MTliNmMwNDgwODhiZmQ2NjA5MDU4MWI0MzNiNzQ4OTI1NzUwMWJiMmE5MWUxN2UwZTg0YTViMzMiLCJyb2xlcyI6WyJvcGVyYXRvciJdLCJzdWIiOiJzdmMtb3BlcmF0b3IiLCJ0ZW5hbnRfaWQiOiJ0MSJ9.SrQtrAkztdVav2Er4Vu-JshSTcTP0eKuZOq43xQMUToo9fNqXFBlINVvProKVTTI_IarD4C8_oMcQyiH5CMufA",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+            },
+            "arguments": {
+              "workspaceId": "0123456789abcdef0123456789abcdef",
+              "language": "python",
+              "code": "print('\u003ca\u003e \u0026 é')",
+              "timeoutSeconds": 5.0
+            },
+            "name": "sandbox_run"
+          },
+          "now": "2026-11-19T12:00:20Z",
+          "expect": {
+            "outcome": "accept",
+            "caller": {
+              "subject": "svc-operator",
+              "tenant": "t1",
+              "roles": [
+                "operator"
+              ],
+              "client": "idp-host",
+              "actor": "idp-host"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "good-expired-within-the-skew",
+      "description": "30 seconds after exp the assertion is still accepted: the clocks may differ by that much.",
+      "origin": "gateway",
+      "steps": [
+        {
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.idp.telos/caller": {
+                "subject": "svc-operator",
+                "tenant": "t1",
+                "roles": [
+                  "operator"
+                ],
+                "client": "idp-host",
+                "actor": "idp-host"
+              },
+              "io.idp.telos/caller-assertion": "eyJhbGciOiJFUzI1NiIsImtpZCI6IlVScHhuTHBLV3FDbFZxV0pUR3owTXo4enhLR2MxOS1hNEEyV0Y5MTJEaTgiLCJ0eXAiOiJpZHAtY2FsbGVyK2p3dCJ9.eyJhY3RvciI6ImlkcC1ob3N0IiwiYXVkIjoiaHR0cDovL3NhbmRib3g6ODU3MC9tY3AiLCJjbGllbnQiOiJpZHAtaG9zdCIsImV4cCI6MTc5NTA4OTY2MCwiaWF0IjoxNzk1MDg5NjAwLCJpc3MiOiJpZHAtbWNwLWdhdGV3YXk6ZzEiLCJqdGkiOiJyd3dRSWREdXkzTGpwWjFsIiwicmVxIjoic2hhMjU2Ojg4NTFiNDQ1MTliNmMwNDgwODhiZmQ2NjA5MDU4MWI0MzNiNzQ4OTI1NzUwMWJiMmE5MWUxN2UwZTg0YTViMzMiLCJyb2xlcyI6WyJvcGVyYXRvciJdLCJzdWIiOiJzdmMtb3BlcmF0b3IiLCJ0ZW5hbnRfaWQiOiJ0MSJ9.h_pbh8oz2ZCJ-JeHVP9GI8QNPVWjfreCvQap2Olsxjke5AadNQh0zcl-tMmPw56w70ey4q32EHnUE2cOKIUkzg",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+            },
+            "arguments": {
+              "workspaceId": "0123456789abcdef0123456789abcdef",
+              "language": "python",
+              "code": "print('\u003ca\u003e \u0026 é')",
+              "timeoutSeconds": 5.0
+            },
+            "name": "sandbox_run"
+          },
+          "now": "2026-11-19T12:01:30Z",
+          "expect": {
+            "outcome": "accept",
+            "caller": {
+              "subject": "svc-operator",
+              "tenant": "t1",
+              "roles": [
+                "operator"
+              ],
+              "client": "idp-host",
+              "actor": "idp-host"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "good-issued-in-the-future-within-the-skew",
+      "description": "An assertion made 30 seconds ahead of the verifier's clock is accepted.",
+      "origin": "gateway",
+      "steps": [
+        {
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.idp.telos/caller": {
+                "subject": "svc-operator",
+                "tenant": "t1",
+                "roles": [
+                  "operator"
+                ],
+                "client": "idp-host",
+                "actor": "idp-host"
+              },
+              "io.idp.telos/caller-assertion": "eyJhbGciOiJFUzI1NiIsImtpZCI6IlVScHhuTHBLV3FDbFZxV0pUR3owTXo4enhLR2MxOS1hNEEyV0Y5MTJEaTgiLCJ0eXAiOiJpZHAtY2FsbGVyK2p3dCJ9.eyJhY3RvciI6ImlkcC1ob3N0IiwiYXVkIjoiaHR0cDovL3NhbmRib3g6ODU3MC9tY3AiLCJjbGllbnQiOiJpZHAtaG9zdCIsImV4cCI6MTc5NTA4OTY2MCwiaWF0IjoxNzk1MDg5NjAwLCJpc3MiOiJpZHAtbWNwLWdhdGV3YXk6ZzEiLCJqdGkiOiJQQ3cyOHUtUDAxYTNKLW5WIiwicmVxIjoic2hhMjU2Ojg4NTFiNDQ1MTliNmMwNDgwODhiZmQ2NjA5MDU4MWI0MzNiNzQ4OTI1NzUwMWJiMmE5MWUxN2UwZTg0YTViMzMiLCJyb2xlcyI6WyJvcGVyYXRvciJdLCJzdWIiOiJzdmMtb3BlcmF0b3IiLCJ0ZW5hbnRfaWQiOiJ0MSJ9.0XBzZQvdMsLaunfS98CzGfXx9kEwCS6BPcna7tu1JZqPCqGeUoyz6YJvAqEKmeiY4QcAGAecycMC40xJfuuiIw",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+            },
+            "arguments": {
+              "workspaceId": "0123456789abcdef0123456789abcdef",
+              "language": "python",
+              "code": "print('\u003ca\u003e \u0026 é')",
+              "timeoutSeconds": 5.0
+            },
+            "name": "sandbox_run"
+          },
+          "now": "2026-11-19T11:59:30Z",
+          "expect": {
+            "outcome": "accept",
+            "caller": {
+              "subject": "svc-operator",
+              "tenant": "t1",
+              "roles": [
+                "operator"
+              ],
+              "client": "idp-host",
+              "actor": "idp-host"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "good-audience-as-a-list",
+      "description": "aud may be a list; it is accepted when it contains this server's endpoint.",
+      "origin": "forged",
+      "steps": [
+        {
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.idp.telos/caller": {
+                "subject": "svc-operator",
+                "tenant": "t1",
+                "roles": [
+                  "operator"
+                ],
+                "client": "idp-host",
+                "actor": "idp-host"
+              },
+              "io.idp.telos/caller-assertion": "eyJhbGciOiJFUzI1NiIsImtpZCI6IlVScHhuTHBLV3FDbFZxV0pUR3owTXo4enhLR2MxOS1hNEEyV0Y5MTJEaTgiLCJ0eXAiOiJpZHAtY2FsbGVyK2p3dCJ9.eyJhY3RvciI6ImlkcC1ob3N0IiwiYXVkIjpbImh0dHA6Ly9hbm90aGVyOjkwMDAvbWNwIiwiaHR0cDovL3NhbmRib3g6ODU3MC9tY3AiXSwiY2xpZW50IjoiaWRwLWhvc3QiLCJleHAiOjE3OTUwODk2NjAsImlhdCI6MTc5NTA4OTYwMCwiaXNzIjoiaWRwLW1jcC1nYXRld2F5OmcxIiwianRpIjoiZm9yZ2VkLTAxIiwicmVxIjoic2hhMjU2Ojg4NTFiNDQ1MTliNmMwNDgwODhiZmQ2NjA5MDU4MWI0MzNiNzQ4OTI1NzUwMWJiMmE5MWUxN2UwZTg0YTViMzMiLCJyb2xlcyI6WyJvcGVyYXRvciJdLCJzdWIiOiJzdmMtb3BlcmF0b3IiLCJ0ZW5hbnRfaWQiOiJ0MSJ9.ssccvoJr1Ghb3e-F_S1lvoqHbpdRrzfrAOnUwhKFRELkcnXGk3mmc5d9hvH5enpolrQ8jKVqY5XUNJMCEu7U4g",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+            },
+            "arguments": {
+              "workspaceId": "0123456789abcdef0123456789abcdef",
+              "language": "python",
+              "code": "print('\u003ca\u003e \u0026 é')",
+              "timeoutSeconds": 5.0
+            },
+            "name": "sandbox_run"
+          },
+          "now": "2026-11-19T12:00:20Z",
+          "expect": {
+            "outcome": "accept",
+            "caller": {
+              "subject": "svc-operator",
+              "tenant": "t1",
+              "roles": [
+                "operator"
+              ],
+              "client": "idp-host",
+              "actor": "idp-host"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "good-lifetime-of-exactly-5-minutes",
+      "description": "The longest lifetime a verifier accepts, although the gateway itself makes one of a minute.",
+      "origin": "forged",
+      "steps": [
+        {
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.idp.telos/caller": {
+                "subject": "svc-operator",
+                "tenant": "t1",
+                "roles": [
+                  "operator"
+                ],
+                "client": "idp-host",
+                "actor": "idp-host"
+              },
+              "io.idp.telos/caller-assertion": "eyJhbGciOiJFUzI1NiIsImtpZCI6IlVScHhuTHBLV3FDbFZxV0pUR3owTXo4enhLR2MxOS1hNEEyV0Y5MTJEaTgiLCJ0eXAiOiJpZHAtY2FsbGVyK2p3dCJ9.eyJhY3RvciI6ImlkcC1ob3N0IiwiYXVkIjoiaHR0cDovL3NhbmRib3g6ODU3MC9tY3AiLCJjbGllbnQiOiJpZHAtaG9zdCIsImV4cCI6MTc5NTA4OTkwMCwiaWF0IjoxNzk1MDg5NjAwLCJpc3MiOiJpZHAtbWNwLWdhdGV3YXk6ZzEiLCJqdGkiOiJmb3JnZWQtMDIiLCJyZXEiOiJzaGEyNTY6ODg1MWI0NDUxOWI2YzA0ODA4OGJmZDY2MDkwNTgxYjQzM2I3NDg5MjU3NTAxYmIyYTkxZTE3ZTBlODRhNWIzMyIsInJvbGVzIjpbIm9wZXJhdG9yIl0sInN1YiI6InN2Yy1vcGVyYXRvciIsInRlbmFudF9pZCI6InQxIn0.Wbn7RmV5e-ZCgNcy6Fd1GmNsL48gqw_PvpLF0B0rVVXwo-3v3ImFYfeCRdXrVRTS6ezz9oTQOULMULFlNs9v4A",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+            },
+            "arguments": {
+              "workspaceId": "0123456789abcdef0123456789abcdef",
+              "language": "python",
+              "code": "print('\u003ca\u003e \u0026 é')",
+              "timeoutSeconds": 5.0
+            },
+            "name": "sandbox_run"
+          },
+          "now": "2026-11-19T12:00:20Z",
+          "expect": {
+            "outcome": "accept",
+            "caller": {
+              "subject": "svc-operator",
+              "tenant": "t1",
+              "roles": [
+                "operator"
+              ],
+              "client": "idp-host",
+              "actor": "idp-host"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "good-assertion-of-exactly-8192-bytes",
+      "description": "The longest assertion a verifier reads: 8192 bytes of compact JWS.",
+      "origin": "forged",
+      "steps": [
+        {
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.idp.telos/caller": {
+                "subject": "svc-operator",
+                "tenant": "t1",
+                "roles": [
+                  "operator"
+                ],
+                "client": "idp-host",
+                "actor": "idp-host"
+              },
+              "io.idp.telos/caller-assertion": "eyJhbGciOiJFUzI1NiIsImtpZCI6IlVScHhuTHBLV3FDbFZxV0pUR3owTXo4enhLR2MxOS1hNEEyV0Y5MTJEaTgiLCJ0eXAiOiJpZHAtY2FsbGVyK2p3dCJ9.eyJhY3RvciI6ImlkcC1ob3N0IiwiYXVkIjoiaHR0cDovL3NhbmRib3g6ODU3MC9tY3AiLCJjbGllbnQiOiJpZHAtaG9zdCIsImV4cCI6MTc5NTA4OTY2MCwiaWF0IjoxNzk1MDg5NjAwLCJpc3MiOiJpZHAtbWNwLWdhdGV3YXk6ZzEiLCJqdGkiOiJmb3JnZWQtNTY5MSIsInBhZCI6ImFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhIiwicmVxIjoic2hhMjU2Ojg4NTFiNDQ1MTliNmMwNDgwODhiZmQ2NjA5MDU4MWI0MzNiNzQ4OTI1NzUwMWJiMmE5MWUxN2UwZTg0YTViMzMiLCJyb2xlcyI6WyJvcGVyYXRvciJdLCJzdWIiOiJzdmMtb3BlcmF0b3IiLCJ0ZW5hbnRfaWQiOiJ0MSJ9.QRT7pZwYQp2d8vkwTzL-E-fpuJxdVkes3ChrxLS_x-3zuxmm0qSOZzD0BDtggixtXprzbWC80ylgHKhE9aVMzQ",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+            },
+            "arguments": {
+              "workspaceId": "0123456789abcdef0123456789abcdef",
+              "language": "python",
+              "code": "print('\u003ca\u003e \u0026 é')",
+              "timeoutSeconds": 5.0
+            },
+            "name": "sandbox_run"
+          },
+          "now": "2026-11-19T12:00:20Z",
+          "expect": {
+            "outcome": "accept",
+            "caller": {
+              "subject": "svc-operator",
+              "tenant": "t1",
+              "roles": [
+                "operator"
+              ],
+              "client": "idp-host",
+              "actor": "idp-host"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "refused-no-assertion",
+      "description": "A call with the unsigned caller of a gateway without a key, or of anyone on the network, and no assertion.",
+      "origin": "forged",
+      "steps": [
+        {
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.idp.telos/caller": {
+                "subject": "svc-operator",
+                "tenant": "t1",
+                "roles": [
+                  "operator"
+                ],
+                "client": "idp-host",
+                "actor": "idp-host"
+              },
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+            },
+            "arguments": {
+              "workspaceId": "0123456789abcdef0123456789abcdef",
+              "language": "python",
+              "code": "print('\u003ca\u003e \u0026 é')",
+              "timeoutSeconds": 5.0
+            },
+            "name": "sandbox_run"
+          },
+          "now": "2026-11-19T12:00:20Z",
+          "expect": {
+            "outcome": "refuse",
+            "reason": "no_assertion"
+          }
+        }
+      ]
+    },
+    {
+      "name": "refused-not-a-jws",
+      "description": "Something that is not a compact JWS.",
+      "origin": "forged",
+      "steps": [
+        {
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.idp.telos/caller": {
+                "subject": "svc-operator",
+                "tenant": "t1",
+                "roles": [
+                  "operator"
+                ],
+                "client": "idp-host",
+                "actor": "idp-host"
+              },
+              "io.idp.telos/caller-assertion": "attachment:1",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+            },
+            "arguments": {
+              "workspaceId": "0123456789abcdef0123456789abcdef",
+              "language": "python",
+              "code": "print('\u003ca\u003e \u0026 é')",
+              "timeoutSeconds": 5.0
+            },
+            "name": "sandbox_run"
+          },
+          "now": "2026-11-19T12:00:20Z",
+          "expect": {
+            "outcome": "refuse",
+            "reason": "malformed"
+          }
+        }
+      ]
+    },
+    {
+      "name": "refused-not-base64url",
+      "description": "Three parts that are not base64url.",
+      "origin": "forged",
+      "steps": [
+        {
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.idp.telos/caller": {
+                "subject": "svc-operator",
+                "tenant": "t1",
+                "roles": [
+                  "operator"
+                ],
+                "client": "idp-host",
+                "actor": "idp-host"
+              },
+              "io.idp.telos/caller-assertion": "a!b.c!d.e!f",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+            },
+            "arguments": {
+              "workspaceId": "0123456789abcdef0123456789abcdef",
+              "language": "python",
+              "code": "print('\u003ca\u003e \u0026 é')",
+              "timeoutSeconds": 5.0
+            },
+            "name": "sandbox_run"
+          },
+          "now": "2026-11-19T12:00:20Z",
+          "expect": {
+            "outcome": "refuse",
+            "reason": "malformed"
+          }
+        }
+      ]
+    },
+    {
+      "name": "refused-over-8192-bytes",
+      "description": "Longer than a verifier reads (over 8192 bytes), validly signed.",
+      "origin": "forged",
+      "steps": [
+        {
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.idp.telos/caller": {
+                "subject": "svc-operator",
+                "tenant": "t1",
+                "roles": [
+                  "operator"
+                ],
+                "client": "idp-host",
+                "actor": "idp-host"
+              },
+              "io.idp.telos/caller-assertion": "eyJhbGciOiJFUzI1NiIsImtpZCI6IlVScHhuTHBLV3FDbFZxV0pUR3owTXo4enhLR2MxOS1hNEEyV0Y5MTJEaTgiLCJ0eXAiOiJpZHAtY2FsbGVyK2p3dCJ9.eyJhY3RvciI6ImlkcC1ob3N0IiwiYXVkIjoiaHR0cDovL3NhbmRib3g6ODU3MC9tY3AiLCJjbGllbnQiOiJpZHAtaG9zdCIsImV4cCI6MTc5NTA4OTY2MCwiaWF0IjoxNzk1MDg5NjAwLCJpc3MiOiJpZHAtbWNwLWdhdGV3YXk6ZzEiLCJqdGkiOiJmb3JnZWQtNTY5MiIsInBhZCI6ImFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhIiwicmVxIjoic2hhMjU2Ojg4NTFiNDQ1MTliNmMwNDgwODhiZmQ2NjA5MDU4MWI0MzNiNzQ4OTI1NzUwMWJiMmE5MWUxN2UwZTg0YTViMzMiLCJyb2xlcyI6WyJvcGVyYXRvciJdLCJzdWIiOiJzdmMtb3BlcmF0b3IiLCJ0ZW5hbnRfaWQiOiJ0MSJ9.MSWs5sP70-8bwPdsS6hh9WhFN_kxf68mDZCGZC4bpuFCWsAWEFpDCcIPOGwKCDQ2WIYQnB20O4VhUHQbJQ5J5A",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+            },
+            "arguments": {
+              "workspaceId": "0123456789abcdef0123456789abcdef",
+              "language": "python",
+              "code": "print('\u003ca\u003e \u0026 é')",
+              "timeoutSeconds": 5.0
+            },
+            "name": "sandbox_run"
+          },
+          "now": "2026-11-19T12:00:20Z",
+          "expect": {
+            "outcome": "refuse",
+            "reason": "malformed"
+          }
+        }
+      ]
+    },
+    {
+      "name": "refused-claims-are-not-an-object",
+      "description": "A correctly signed JWS whose payload is a list.",
+      "origin": "forged",
+      "steps": [
+        {
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.idp.telos/caller": {
+                "subject": "svc-operator",
+                "tenant": "t1",
+                "roles": [
+                  "operator"
+                ],
+                "client": "idp-host",
+                "actor": "idp-host"
+              },
+              "io.idp.telos/caller-assertion": "eyJhbGciOiJFUzI1NiIsImtpZCI6IlVScHhuTHBLV3FDbFZxV0pUR3owTXo4enhLR2MxOS1hNEEyV0Y5MTJEaTgiLCJ0eXAiOiJpZHAtY2FsbGVyK2p3dCJ9.W10.2A3bNVUVoj-jAIcmzTZnV7Ce_82iDYLpKeo-xQJTiQoLvjZ7akOXx0ruWWVuyRUJ_5Oyc3MQTFZQmwaFNYJ-Sg",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+            },
+            "arguments": {
+              "workspaceId": "0123456789abcdef0123456789abcdef",
+              "language": "python",
+              "code": "print('\u003ca\u003e \u0026 é')",
+              "timeoutSeconds": 5.0
+            },
+            "name": "sandbox_run"
+          },
+          "now": "2026-11-19T12:00:20Z",
+          "expect": {
+            "outcome": "refuse",
+            "reason": "malformed"
+          }
+        }
+      ]
+    },
+    {
+      "name": "refused-alg-none",
+      "description": "alg none with a gateway kid and an empty signature.",
+      "origin": "forged",
+      "steps": [
+        {
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.idp.telos/caller": {
+                "subject": "svc-operator",
+                "tenant": "t1",
+                "roles": [
+                  "operator"
+                ],
+                "client": "idp-host",
+                "actor": "idp-host"
+              },
+              "io.idp.telos/caller-assertion": "eyJhbGciOiJub25lIiwia2lkIjoiVVJweG5McEtXcUNsVnFXSlRHejBNejh6eEtHYzE5LWE0QTJXRjkxMkRpOCIsInR5cCI6ImlkcC1jYWxsZXIrand0In0.eyJhY3RvciI6ImlkcC1ob3N0IiwiYXVkIjoiaHR0cDovL3NhbmRib3g6ODU3MC9tY3AiLCJjbGllbnQiOiJpZHAtaG9zdCIsImV4cCI6MTc5NTA4OTY2MCwiaWF0IjoxNzk1MDg5NjAwLCJpc3MiOiJpZHAtbWNwLWdhdGV3YXk6ZzEiLCJqdGkiOiJmb3JnZWQtNTY5MyIsInJlcSI6InNoYTI1Njo4ODUxYjQ0NTE5YjZjMDQ4MDg4YmZkNjYwOTA1ODFiNDMzYjc0ODkyNTc1MDFiYjJhOTFlMTdlMGU4NGE1YjMzIiwicm9sZXMiOlsib3BlcmF0b3IiXSwic3ViIjoic3ZjLW9wZXJhdG9yIiwidGVuYW50X2lkIjoidDEifQ.",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+            },
+            "arguments": {
+              "workspaceId": "0123456789abcdef0123456789abcdef",
+              "language": "python",
+              "code": "print('\u003ca\u003e \u0026 é')",
+              "timeoutSeconds": 5.0
+            },
+            "name": "sandbox_run"
+          },
+          "now": "2026-11-19T12:00:20Z",
+          "expect": {
+            "outcome": "refuse",
+            "reason": "header"
+          }
+        }
+      ]
+    },
+    {
+      "name": "refused-alg-hs256-keyed-with-the-public-key",
+      "description": "The classic confusion: an HMAC made with the gateway's public key (its PEM text) as the secret.",
+      "origin": "forged",
+      "steps": [
+        {
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.idp.telos/caller": {
+                "subject": "svc-operator",
+                "tenant": "t1",
+                "roles": [
+                  "operator"
+                ],
+                "client": "idp-host",
+                "actor": "idp-host"
+              },
+              "io.idp.telos/caller-assertion": "eyJhbGciOiJIUzI1NiIsImtpZCI6IlVScHhuTHBLV3FDbFZxV0pUR3owTXo4enhLR2MxOS1hNEEyV0Y5MTJEaTgiLCJ0eXAiOiJpZHAtY2FsbGVyK2p3dCJ9.eyJhY3RvciI6ImlkcC1ob3N0IiwiYXVkIjoiaHR0cDovL3NhbmRib3g6ODU3MC9tY3AiLCJjbGllbnQiOiJpZHAtaG9zdCIsImV4cCI6MTc5NTA4OTY2MCwiaWF0IjoxNzk1MDg5NjAwLCJpc3MiOiJpZHAtbWNwLWdhdGV3YXk6ZzEiLCJqdGkiOiJmb3JnZWQtNTY5NCIsInJlcSI6InNoYTI1Njo4ODUxYjQ0NTE5YjZjMDQ4MDg4YmZkNjYwOTA1ODFiNDMzYjc0ODkyNTc1MDFiYjJhOTFlMTdlMGU4NGE1YjMzIiwicm9sZXMiOlsib3BlcmF0b3IiXSwic3ViIjoic3ZjLW9wZXJhdG9yIiwidGVuYW50X2lkIjoidDEifQ.4DrO3vTMSudUkyvQGe1V6VkCc1myl3CZ7zx8WL48tHs",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+            },
+            "arguments": {
+              "workspaceId": "0123456789abcdef0123456789abcdef",
+              "language": "python",
+              "code": "print('\u003ca\u003e \u0026 é')",
+              "timeoutSeconds": 5.0
+            },
+            "name": "sandbox_run"
+          },
+          "now": "2026-11-19T12:00:20Z",
+          "expect": {
+            "outcome": "refuse",
+            "reason": "header"
+          }
+        }
+      ]
+    },
+    {
+      "name": "refused-another-typ",
+      "description": "typ JWT: an access token, not a caller assertion, signed by a held key.",
+      "origin": "forged",
+      "steps": [
+        {
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.idp.telos/caller": {
+                "subject": "svc-operator",
+                "tenant": "t1",
+                "roles": [
+                  "operator"
+                ],
+                "client": "idp-host",
+                "actor": "idp-host"
+              },
+              "io.idp.telos/caller-assertion": "eyJhbGciOiJFUzI1NiIsImtpZCI6IlVScHhuTHBLV3FDbFZxV0pUR3owTXo4enhLR2MxOS1hNEEyV0Y5MTJEaTgiLCJ0eXAiOiJKV1QifQ.eyJhY3RvciI6ImlkcC1ob3N0IiwiYXVkIjoiaHR0cDovL3NhbmRib3g6ODU3MC9tY3AiLCJjbGllbnQiOiJpZHAtaG9zdCIsImV4cCI6MTc5NTA4OTY2MCwiaWF0IjoxNzk1MDg5NjAwLCJpc3MiOiJpZHAtbWNwLWdhdGV3YXk6ZzEiLCJqdGkiOiJmb3JnZWQtNTY5NSIsInJlcSI6InNoYTI1Njo4ODUxYjQ0NTE5YjZjMDQ4MDg4YmZkNjYwOTA1ODFiNDMzYjc0ODkyNTc1MDFiYjJhOTFlMTdlMGU4NGE1YjMzIiwicm9sZXMiOlsib3BlcmF0b3IiXSwic3ViIjoic3ZjLW9wZXJhdG9yIiwidGVuYW50X2lkIjoidDEifQ.p1xgkp73oDUV_8aXKVMgh7dGHHFeTS91D8Tva1G-Zcsx1GPWpWeUakCvABq0_Sl7UFG0yf1-0-_9xYM9FYJz7Q",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+            },
+            "arguments": {
+              "workspaceId": "0123456789abcdef0123456789abcdef",
+              "language": "python",
+              "code": "print('\u003ca\u003e \u0026 é')",
+              "timeoutSeconds": 5.0
+            },
+            "name": "sandbox_run"
+          },
+          "now": "2026-11-19T12:00:20Z",
+          "expect": {
+            "outcome": "refuse",
+            "reason": "header"
+          }
+        }
+      ]
+    },
+    {
+      "name": "refused-signed-with-p384-and-es384",
+      "description": "A P-384 key signing ES384, as someone with a different curve would.",
+      "origin": "forged",
+      "steps": [
+        {
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.idp.telos/caller": {
+                "subject": "svc-operator",
+                "tenant": "t1",
+                "roles": [
+                  "operator"
+                ],
+                "client": "idp-host",
+                "actor": "idp-host"
+              },
+              "io.idp.telos/caller-assertion": "eyJhbGciOiJFUzM4NCIsImtpZCI6IlVScHhuTHBLV3FDbFZxV0pUR3owTXo4enhLR2MxOS1hNEEyV0Y5MTJEaTgiLCJ0eXAiOiJpZHAtY2FsbGVyK2p3dCJ9.eyJhY3RvciI6ImlkcC1ob3N0IiwiYXVkIjoiaHR0cDovL3NhbmRib3g6ODU3MC9tY3AiLCJjbGllbnQiOiJpZHAtaG9zdCIsImV4cCI6MTc5NTA4OTY2MCwiaWF0IjoxNzk1MDg5NjAwLCJpc3MiOiJpZHAtbWNwLWdhdGV3YXk6ZzEiLCJqdGkiOiJmb3JnZWQtNTY5NiIsInJlcSI6InNoYTI1Njo4ODUxYjQ0NTE5YjZjMDQ4MDg4YmZkNjYwOTA1ODFiNDMzYjc0ODkyNTc1MDFiYjJhOTFlMTdlMGU4NGE1YjMzIiwicm9sZXMiOlsib3BlcmF0b3IiXSwic3ViIjoic3ZjLW9wZXJhdG9yIiwidGVuYW50X2lkIjoidDEifQ.KccuGz-g_g5BM-L1FaVGkA57o4SoCDyE5x4MIFa-gpXpghuekF0QlHt0ApG2G8655taqjoKd62bG69x3fSOAHQ012llehT90mMblPKNdHrktSFhTuTcGQb0M7pADFGGn",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+            },
+            "arguments": {
+              "workspaceId": "0123456789abcdef0123456789abcdef",
+              "language": "python",
+              "code": "print('\u003ca\u003e \u0026 é')",
+              "timeoutSeconds": 5.0
+            },
+            "name": "sandbox_run"
+          },
+          "now": "2026-11-19T12:00:20Z",
+          "expect": {
+            "outcome": "refuse",
+            "reason": "header"
+          }
+        }
+      ]
+    },
+    {
+      "name": "refused-signed-with-p384-under-an-es256-header",
+      "description": "A P-384 signature (96 bytes) under an ES256 header and a held kid: the signature has the wrong size.",
+      "origin": "forged",
+      "steps": [
+        {
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.idp.telos/caller": {
+                "subject": "svc-operator",
+                "tenant": "t1",
+                "roles": [
+                  "operator"
+                ],
+                "client": "idp-host",
+                "actor": "idp-host"
+              },
+              "io.idp.telos/caller-assertion": "eyJhbGciOiJFUzI1NiIsImtpZCI6IlVScHhuTHBLV3FDbFZxV0pUR3owTXo4enhLR2MxOS1hNEEyV0Y5MTJEaTgiLCJ0eXAiOiJpZHAtY2FsbGVyK2p3dCJ9.eyJhY3RvciI6ImlkcC1ob3N0IiwiYXVkIjoiaHR0cDovL3NhbmRib3g6ODU3MC9tY3AiLCJjbGllbnQiOiJpZHAtaG9zdCIsImV4cCI6MTc5NTA4OTY2MCwiaWF0IjoxNzk1MDg5NjAwLCJpc3MiOiJpZHAtbWNwLWdhdGV3YXk6ZzEiLCJqdGkiOiJmb3JnZWQtNTY5NyIsInJlcSI6InNoYTI1Njo4ODUxYjQ0NTE5YjZjMDQ4MDg4YmZkNjYwOTA1ODFiNDMzYjc0ODkyNTc1MDFiYjJhOTFlMTdlMGU4NGE1YjMzIiwicm9sZXMiOlsib3BlcmF0b3IiXSwic3ViIjoic3ZjLW9wZXJhdG9yIiwidGVuYW50X2lkIjoidDEifQ.7J0xkZdSyVKxhZk98tUcnerzvVJgQnBfWDGpLJtTBq3OJm1N7k9echW6323MC19bxUNEDMPWrDwfRNBCzQBpTUGm-gyYq5hgVsvLhUa0vfLwAXPvm-j6ZBFGFQ2N26Ip",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+            },
+            "arguments": {
+              "workspaceId": "0123456789abcdef0123456789abcdef",
+              "language": "python",
+              "code": "print('\u003ca\u003e \u0026 é')",
+              "timeoutSeconds": 5.0
+            },
+            "name": "sandbox_run"
+          },
+          "now": "2026-11-19T12:00:20Z",
+          "expect": {
+            "outcome": "refuse",
+            "reason": "bad_signature"
+          }
+        }
+      ]
+    },
+    {
+      "name": "refused-unknown-kid",
+      "description": "Signed by a key the verifier does not hold, under that key's own kid.",
+      "origin": "forged",
+      "steps": [
+        {
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.idp.telos/caller": {
+                "subject": "svc-operator",
+                "tenant": "t1",
+                "roles": [
+                  "operator"
+                ],
+                "client": "idp-host",
+                "actor": "idp-host"
+              },
+              "io.idp.telos/caller-assertion": "eyJhbGciOiJFUzI1NiIsImtpZCI6Ik5PLW5nbmFadVQ4R1ZlZXRlbkM1aFJLLTBkNGJuakJFYUNQMjNIZkVtQWMiLCJ0eXAiOiJpZHAtY2FsbGVyK2p3dCJ9.eyJhY3RvciI6ImlkcC1ob3N0IiwiYXVkIjoiaHR0cDovL3NhbmRib3g6ODU3MC9tY3AiLCJjbGllbnQiOiJpZHAtaG9zdCIsImV4cCI6MTc5NTA4OTY2MCwiaWF0IjoxNzk1MDg5NjAwLCJpc3MiOiJpZHAtbWNwLWdhdGV3YXk6ZzEiLCJqdGkiOiJmb3JnZWQtNTY5OCIsInJlcSI6InNoYTI1Njo4ODUxYjQ0NTE5YjZjMDQ4MDg4YmZkNjYwOTA1ODFiNDMzYjc0ODkyNTc1MDFiYjJhOTFlMTdlMGU4NGE1YjMzIiwicm9sZXMiOlsib3BlcmF0b3IiXSwic3ViIjoic3ZjLW9wZXJhdG9yIiwidGVuYW50X2lkIjoidDEifQ._Sw9MwIR3Ada5grJGolSg-btvRhN_Rj853VXtC6aVlWpbajiZzokVen6U0vgsv13kqTf7Rx-9_p3rLgV112MFg",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+            },
+            "arguments": {
+              "workspaceId": "0123456789abcdef0123456789abcdef",
+              "language": "python",
+              "code": "print('\u003ca\u003e \u0026 é')",
+              "timeoutSeconds": 5.0
+            },
+            "name": "sandbox_run"
+          },
+          "now": "2026-11-19T12:00:20Z",
+          "expect": {
+            "outcome": "refuse",
+            "reason": "unknown_key"
+          }
+        }
+      ]
+    },
+    {
+      "name": "refused-bad-signature-under-a-known-kid",
+      "description": "Signed by another key under the gateway's kid.",
+      "origin": "forged",
+      "steps": [
+        {
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.idp.telos/caller": {
+                "subject": "svc-operator",
+                "tenant": "t1",
+                "roles": [
+                  "operator"
+                ],
+                "client": "idp-host",
+                "actor": "idp-host"
+              },
+              "io.idp.telos/caller-assertion": "eyJhbGciOiJFUzI1NiIsImtpZCI6IlVScHhuTHBLV3FDbFZxV0pUR3owTXo4enhLR2MxOS1hNEEyV0Y5MTJEaTgiLCJ0eXAiOiJpZHAtY2FsbGVyK2p3dCJ9.eyJhY3RvciI6ImlkcC1ob3N0IiwiYXVkIjoiaHR0cDovL3NhbmRib3g6ODU3MC9tY3AiLCJjbGllbnQiOiJpZHAtaG9zdCIsImV4cCI6MTc5NTA4OTY2MCwiaWF0IjoxNzk1MDg5NjAwLCJpc3MiOiJpZHAtbWNwLWdhdGV3YXk6ZzEiLCJqdGkiOiJmb3JnZWQtNTY5OSIsInJlcSI6InNoYTI1Njo4ODUxYjQ0NTE5YjZjMDQ4MDg4YmZkNjYwOTA1ODFiNDMzYjc0ODkyNTc1MDFiYjJhOTFlMTdlMGU4NGE1YjMzIiwicm9sZXMiOlsib3BlcmF0b3IiXSwic3ViIjoic3ZjLW9wZXJhdG9yIiwidGVuYW50X2lkIjoidDEifQ._W5E95eQfCreZtI43ik8KOwViGyrvwHRMlNiE56tavdHzPqYqIsYAdzh7CHeEY4zm6US2ynS5ZOdxJ6rCTZ8Sw",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+            },
+            "arguments": {
+              "workspaceId": "0123456789abcdef0123456789abcdef",
+              "language": "python",
+              "code": "print('\u003ca\u003e \u0026 é')",
+              "timeoutSeconds": 5.0
+            },
+            "name": "sandbox_run"
+          },
+          "now": "2026-11-19T12:00:20Z",
+          "expect": {
+            "outcome": "refuse",
+            "reason": "bad_signature"
+          }
+        }
+      ]
+    },
+    {
+      "name": "refused-claims-swapped-after-signing",
+      "description": "The gateway's header and signature with other claims.",
+      "origin": "forged",
+      "steps": [
+        {
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.idp.telos/caller": {
+                "subject": "svc-operator",
+                "tenant": "t1",
+                "roles": [
+                  "operator"
+                ],
+                "client": "idp-host",
+                "actor": "idp-host"
+              },
+              "io.idp.telos/caller-assertion": "eyJhbGciOiJFUzI1NiIsImtpZCI6IlVScHhuTHBLV3FDbFZxV0pUR3owTXo4enhLR2MxOS1hNEEyV0Y5MTJEaTgiLCJ0eXAiOiJpZHAtY2FsbGVyK2p3dCJ9.eyJzdWIiOiJhZG1pbiJ9.h_pbh8oz2ZCJ-JeHVP9GI8QNPVWjfreCvQap2Olsxjke5AadNQh0zcl-tMmPw56w70ey4q32EHnUE2cOKIUkzg",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+            },
+            "arguments": {
+              "workspaceId": "0123456789abcdef0123456789abcdef",
+              "language": "python",
+              "code": "print('\u003ca\u003e \u0026 é')",
+              "timeoutSeconds": 5.0
+            },
+            "name": "sandbox_run"
+          },
+          "now": "2026-11-19T12:00:20Z",
+          "expect": {
+            "outcome": "refuse",
+            "reason": "bad_signature"
+          }
+        }
+      ]
+    },
+    {
+      "name": "refused-signature-of-the-wrong-size",
+      "description": "A signature of three bytes.",
+      "origin": "forged",
+      "steps": [
+        {
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.idp.telos/caller": {
+                "subject": "svc-operator",
+                "tenant": "t1",
+                "roles": [
+                  "operator"
+                ],
+                "client": "idp-host",
+                "actor": "idp-host"
+              },
+              "io.idp.telos/caller-assertion": "eyJhbGciOiJFUzI1NiIsImtpZCI6IlVScHhuTHBLV3FDbFZxV0pUR3owTXo4enhLR2MxOS1hNEEyV0Y5MTJEaTgiLCJ0eXAiOiJpZHAtY2FsbGVyK2p3dCJ9.eyJhY3RvciI6ImlkcC1ob3N0IiwiYXVkIjoiaHR0cDovL3NhbmRib3g6ODU3MC9tY3AiLCJjbGllbnQiOiJpZHAtaG9zdCIsImV4cCI6MTc5NTA4OTY2MCwiaWF0IjoxNzk1MDg5NjAwLCJpc3MiOiJpZHAtbWNwLWdhdGV3YXk6ZzEiLCJqdGkiOiJyd3dRSWREdXkzTGpwWjFsIiwicmVxIjoic2hhMjU2Ojg4NTFiNDQ1MTliNmMwNDgwODhiZmQ2NjA5MDU4MWI0MzNiNzQ4OTI1NzUwMWJiMmE5MWUxN2UwZTg0YTViMzMiLCJyb2xlcyI6WyJvcGVyYXRvciJdLCJzdWIiOiJzdmMtb3BlcmF0b3IiLCJ0ZW5hbnRfaWQiOiJ0MSJ9.AAAA",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+            },
+            "arguments": {
+              "workspaceId": "0123456789abcdef0123456789abcdef",
+              "language": "python",
+              "code": "print('\u003ca\u003e \u0026 é')",
+              "timeoutSeconds": 5.0
+            },
+            "name": "sandbox_run"
+          },
+          "now": "2026-11-19T12:00:20Z",
+          "expect": {
+            "outcome": "refuse",
+            "reason": "bad_signature"
+          }
+        }
+      ]
+    },
+    {
+      "name": "refused-wrong-audience",
+      "description": "Signed by the gateway for another upstream's endpoint.",
+      "origin": "gateway",
+      "steps": [
+        {
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.idp.telos/caller": {
+                "subject": "svc-operator",
+                "tenant": "t1",
+                "roles": [
+                  "operator"
+                ],
+                "client": "idp-host",
+                "actor": "idp-host"
+              },
+              "io.idp.telos/caller-assertion": "eyJhbGciOiJFUzI1NiIsImtpZCI6IlVScHhuTHBLV3FDbFZxV0pUR3owTXo4enhLR2MxOS1hNEEyV0Y5MTJEaTgiLCJ0eXAiOiJpZHAtY2FsbGVyK2p3dCJ9.eyJhY3RvciI6ImlkcC1ob3N0IiwiYXVkIjoiaHR0cDovL2Fub3RoZXItc2VydmVyOjkwMDAvbWNwIiwiY2xpZW50IjoiaWRwLWhvc3QiLCJleHAiOjE3OTUwODk2NjAsImlhdCI6MTc5NTA4OTYwMCwiaXNzIjoiaWRwLW1jcC1nYXRld2F5OmcxIiwianRpIjoicWdCOTNRY1VQX1NzT3JDXyIsInJlcSI6InNoYTI1Njo4ODUxYjQ0NTE5YjZjMDQ4MDg4YmZkNjYwOTA1ODFiNDMzYjc0ODkyNTc1MDFiYjJhOTFlMTdlMGU4NGE1YjMzIiwicm9sZXMiOlsib3BlcmF0b3IiXSwic3ViIjoic3ZjLW9wZXJhdG9yIiwidGVuYW50X2lkIjoidDEifQ.E2i88xcn4_pBPdWb9P7rxy3PK8snhJ7BZENuRNzhaQ7Koz9qKv7Y_NdsRaiGKc46cK2Wt1NupbFBlbOHg7T1jQ",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+            },
+            "arguments": {
+              "workspaceId": "0123456789abcdef0123456789abcdef",
+              "language": "python",
+              "code": "print('\u003ca\u003e \u0026 é')",
+              "timeoutSeconds": 5.0
+            },
+            "name": "sandbox_run"
+          },
+          "now": "2026-11-19T12:00:20Z",
+          "expect": {
+            "outcome": "refuse",
+            "reason": "audience"
+          }
+        }
+      ]
+    },
+    {
+      "name": "refused-audience-list-without-this-server",
+      "description": "aud as a list that does not contain this server's endpoint.",
+      "origin": "forged",
+      "steps": [
+        {
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.idp.telos/caller": {
+                "subject": "svc-operator",
+                "tenant": "t1",
+                "roles": [
+                  "operator"
+                ],
+                "client": "idp-host",
+                "actor": "idp-host"
+              },
+              "io.idp.telos/caller-assertion": "eyJhbGciOiJFUzI1NiIsImtpZCI6IlVScHhuTHBLV3FDbFZxV0pUR3owTXo4enhLR2MxOS1hNEEyV0Y5MTJEaTgiLCJ0eXAiOiJpZHAtY2FsbGVyK2p3dCJ9.eyJhY3RvciI6ImlkcC1ob3N0IiwiYXVkIjpbImh0dHA6Ly9hbm90aGVyOjkwMDAvbWNwIl0sImNsaWVudCI6ImlkcC1ob3N0IiwiZXhwIjoxNzk1MDg5NjYwLCJpYXQiOjE3OTUwODk2MDAsImlzcyI6ImlkcC1tY3AtZ2F0ZXdheTpnMSIsImp0aSI6ImZvcmdlZC01NzAwIiwicmVxIjoic2hhMjU2Ojg4NTFiNDQ1MTliNmMwNDgwODhiZmQ2NjA5MDU4MWI0MzNiNzQ4OTI1NzUwMWJiMmE5MWUxN2UwZTg0YTViMzMiLCJyb2xlcyI6WyJvcGVyYXRvciJdLCJzdWIiOiJzdmMtb3BlcmF0b3IiLCJ0ZW5hbnRfaWQiOiJ0MSJ9.maTZkP_PnmLQ1FTCbO0yHGRkmb-x6_lVWrUMVJ6t2I03OvlNKfdo5okjob4w7lFk1Xplv9TsPrVTjYqU7tsCGw",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+            },
+            "arguments": {
+              "workspaceId": "0123456789abcdef0123456789abcdef",
+              "language": "python",
+              "code": "print('\u003ca\u003e \u0026 é')",
+              "timeoutSeconds": 5.0
+            },
+            "name": "sandbox_run"
+          },
+          "now": "2026-11-19T12:00:20Z",
+          "expect": {
+            "outcome": "refuse",
+            "reason": "audience"
+          }
+        }
+      ]
+    },
+    {
+      "name": "refused-expired",
+      "description": "31 seconds after exp: beyond the 30 seconds of clock skew.",
+      "origin": "gateway",
+      "steps": [
+        {
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.idp.telos/caller": {
+                "subject": "svc-operator",
+                "tenant": "t1",
+                "roles": [
+                  "operator"
+                ],
+                "client": "idp-host",
+                "actor": "idp-host"
+              },
+              "io.idp.telos/caller-assertion": "eyJhbGciOiJFUzI1NiIsImtpZCI6IlVScHhuTHBLV3FDbFZxV0pUR3owTXo4enhLR2MxOS1hNEEyV0Y5MTJEaTgiLCJ0eXAiOiJpZHAtY2FsbGVyK2p3dCJ9.eyJhY3RvciI6ImlkcC1ob3N0IiwiYXVkIjoiaHR0cDovL3NhbmRib3g6ODU3MC9tY3AiLCJjbGllbnQiOiJpZHAtaG9zdCIsImV4cCI6MTc5NTA4OTY2MCwiaWF0IjoxNzk1MDg5NjAwLCJpc3MiOiJpZHAtbWNwLWdhdGV3YXk6ZzEiLCJqdGkiOiJyd3dRSWREdXkzTGpwWjFsIiwicmVxIjoic2hhMjU2Ojg4NTFiNDQ1MTliNmMwNDgwODhiZmQ2NjA5MDU4MWI0MzNiNzQ4OTI1NzUwMWJiMmE5MWUxN2UwZTg0YTViMzMiLCJyb2xlcyI6WyJvcGVyYXRvciJdLCJzdWIiOiJzdmMtb3BlcmF0b3IiLCJ0ZW5hbnRfaWQiOiJ0MSJ9.h_pbh8oz2ZCJ-JeHVP9GI8QNPVWjfreCvQap2Olsxjke5AadNQh0zcl-tMmPw56w70ey4q32EHnUE2cOKIUkzg",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+            },
+            "arguments": {
+              "workspaceId": "0123456789abcdef0123456789abcdef",
+              "language": "python",
+              "code": "print('\u003ca\u003e \u0026 é')",
+              "timeoutSeconds": 5.0
+            },
+            "name": "sandbox_run"
+          },
+          "now": "2026-11-19T12:01:31Z",
+          "expect": {
+            "outcome": "refuse",
+            "reason": "expired"
+          }
+        }
+      ]
+    },
+    {
+      "name": "refused-issued-in-the-future",
+      "description": "Made 31 seconds ahead of the verifier's clock: beyond the skew.",
+      "origin": "gateway",
+      "steps": [
+        {
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.idp.telos/caller": {
+                "subject": "svc-operator",
+                "tenant": "t1",
+                "roles": [
+                  "operator"
+                ],
+                "client": "idp-host",
+                "actor": "idp-host"
+              },
+              "io.idp.telos/caller-assertion": "eyJhbGciOiJFUzI1NiIsImtpZCI6IlVScHhuTHBLV3FDbFZxV0pUR3owTXo4enhLR2MxOS1hNEEyV0Y5MTJEaTgiLCJ0eXAiOiJpZHAtY2FsbGVyK2p3dCJ9.eyJhY3RvciI6ImlkcC1ob3N0IiwiYXVkIjoiaHR0cDovL3NhbmRib3g6ODU3MC9tY3AiLCJjbGllbnQiOiJpZHAtaG9zdCIsImV4cCI6MTc5NTA4OTY2MCwiaWF0IjoxNzk1MDg5NjAwLCJpc3MiOiJpZHAtbWNwLWdhdGV3YXk6ZzEiLCJqdGkiOiJGMWVrZHZ5c2VWcU5qMXFLIiwicmVxIjoic2hhMjU2Ojg4NTFiNDQ1MTliNmMwNDgwODhiZmQ2NjA5MDU4MWI0MzNiNzQ4OTI1NzUwMWJiMmE5MWUxN2UwZTg0YTViMzMiLCJyb2xlcyI6WyJvcGVyYXRvciJdLCJzdWIiOiJzdmMtb3BlcmF0b3IiLCJ0ZW5hbnRfaWQiOiJ0MSJ9.tfUGn90zZZxufyAdVx6cYyfDRVKwTRtemKmtp2068DMiWYoDoSP3r2X5zkVb0xfyAbcwBwQNVDB43zZZKVCGxQ",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+            },
+            "arguments": {
+              "workspaceId": "0123456789abcdef0123456789abcdef",
+              "language": "python",
+              "code": "print('\u003ca\u003e \u0026 é')",
+              "timeoutSeconds": 5.0
+            },
+            "name": "sandbox_run"
+          },
+          "now": "2026-11-19T11:59:29Z",
+          "expect": {
+            "outcome": "refuse",
+            "reason": "issued_in_future"
+          }
+        }
+      ]
+    },
+    {
+      "name": "refused-lifetime-over-5-minutes",
+      "description": "exp is 5 minutes and a second after iat.",
+      "origin": "forged",
+      "steps": [
+        {
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.idp.telos/caller": {
+                "subject": "svc-operator",
+                "tenant": "t1",
+                "roles": [
+                  "operator"
+                ],
+                "client": "idp-host",
+                "actor": "idp-host"
+              },
+              "io.idp.telos/caller-assertion": "eyJhbGciOiJFUzI1NiIsImtpZCI6IlVScHhuTHBLV3FDbFZxV0pUR3owTXo4enhLR2MxOS1hNEEyV0Y5MTJEaTgiLCJ0eXAiOiJpZHAtY2FsbGVyK2p3dCJ9.eyJhY3RvciI6ImlkcC1ob3N0IiwiYXVkIjoiaHR0cDovL3NhbmRib3g6ODU3MC9tY3AiLCJjbGllbnQiOiJpZHAtaG9zdCIsImV4cCI6MTc5NTA4OTkwMSwiaWF0IjoxNzk1MDg5NjAwLCJpc3MiOiJpZHAtbWNwLWdhdGV3YXk6ZzEiLCJqdGkiOiJmb3JnZWQtNTcwMSIsInJlcSI6InNoYTI1Njo4ODUxYjQ0NTE5YjZjMDQ4MDg4YmZkNjYwOTA1ODFiNDMzYjc0ODkyNTc1MDFiYjJhOTFlMTdlMGU4NGE1YjMzIiwicm9sZXMiOlsib3BlcmF0b3IiXSwic3ViIjoic3ZjLW9wZXJhdG9yIiwidGVuYW50X2lkIjoidDEifQ.jRyv3YzbOyR-U-nT0meqXJW8wuSFMylKdzk56Vx3YR7SNG10lhXzIZ0iIPSrBa0qqLQ5Spsn0jwwmj-Ua0sgIg",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+            },
+            "arguments": {
+              "workspaceId": "0123456789abcdef0123456789abcdef",
+              "language": "python",
+              "code": "print('\u003ca\u003e \u0026 é')",
+              "timeoutSeconds": 5.0
+            },
+            "name": "sandbox_run"
+          },
+          "now": "2026-11-19T12:00:20Z",
+          "expect": {
+            "outcome": "refuse",
+            "reason": "lifetime"
+          }
+        }
+      ]
+    },
+    {
+      "name": "refused-exp-before-iat",
+      "description": "exp one second before iat (not yet expired at the time of presentation).",
+      "origin": "forged",
+      "steps": [
+        {
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.idp.telos/caller": {
+                "subject": "svc-operator",
+                "tenant": "t1",
+                "roles": [
+                  "operator"
+                ],
+                "client": "idp-host",
+                "actor": "idp-host"
+              },
+              "io.idp.telos/caller-assertion": "eyJhbGciOiJFUzI1NiIsImtpZCI6IlVScHhuTHBLV3FDbFZxV0pUR3owTXo4enhLR2MxOS1hNEEyV0Y5MTJEaTgiLCJ0eXAiOiJpZHAtY2FsbGVyK2p3dCJ9.eyJhY3RvciI6ImlkcC1ob3N0IiwiYXVkIjoiaHR0cDovL3NhbmRib3g6ODU3MC9tY3AiLCJjbGllbnQiOiJpZHAtaG9zdCIsImV4cCI6MTc5NTA4OTU5OSwiaWF0IjoxNzk1MDg5NjAwLCJpc3MiOiJpZHAtbWNwLWdhdGV3YXk6ZzEiLCJqdGkiOiJmb3JnZWQtNTcwMiIsInJlcSI6InNoYTI1Njo4ODUxYjQ0NTE5YjZjMDQ4MDg4YmZkNjYwOTA1ODFiNDMzYjc0ODkyNTc1MDFiYjJhOTFlMTdlMGU4NGE1YjMzIiwicm9sZXMiOlsib3BlcmF0b3IiXSwic3ViIjoic3ZjLW9wZXJhdG9yIiwidGVuYW50X2lkIjoidDEifQ.y8Qyq-Wqyty6Hx_odeAaTwFsZJTaQ1adr-hW7kN_uAw6yg9i_kBjM_N5NaIiNh8YNTLZvIMo5vT7hny_7JaNyw",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+            },
+            "arguments": {
+              "workspaceId": "0123456789abcdef0123456789abcdef",
+              "language": "python",
+              "code": "print('\u003ca\u003e \u0026 é')",
+              "timeoutSeconds": 5.0
+            },
+            "name": "sandbox_run"
+          },
+          "now": "2026-11-19T12:00:20Z",
+          "expect": {
+            "outcome": "refuse",
+            "reason": "lifetime"
+          }
+        }
+      ]
+    },
+    {
+      "name": "refused-no-expiry",
+      "description": "No exp claim.",
+      "origin": "forged",
+      "steps": [
+        {
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.idp.telos/caller": {
+                "subject": "svc-operator",
+                "tenant": "t1",
+                "roles": [
+                  "operator"
+                ],
+                "client": "idp-host",
+                "actor": "idp-host"
+              },
+              "io.idp.telos/caller-assertion": "eyJhbGciOiJFUzI1NiIsImtpZCI6IlVScHhuTHBLV3FDbFZxV0pUR3owTXo4enhLR2MxOS1hNEEyV0Y5MTJEaTgiLCJ0eXAiOiJpZHAtY2FsbGVyK2p3dCJ9.eyJhY3RvciI6ImlkcC1ob3N0IiwiYXVkIjoiaHR0cDovL3NhbmRib3g6ODU3MC9tY3AiLCJjbGllbnQiOiJpZHAtaG9zdCIsImlhdCI6MTc5NTA4OTYwMCwiaXNzIjoiaWRwLW1jcC1nYXRld2F5OmcxIiwianRpIjoiZm9yZ2VkLTU3MDMiLCJyZXEiOiJzaGEyNTY6ODg1MWI0NDUxOWI2YzA0ODA4OGJmZDY2MDkwNTgxYjQzM2I3NDg5MjU3NTAxYmIyYTkxZTE3ZTBlODRhNWIzMyIsInJvbGVzIjpbIm9wZXJhdG9yIl0sInN1YiI6InN2Yy1vcGVyYXRvciIsInRlbmFudF9pZCI6InQxIn0.QOpVLJVthwQV2n-PUGgcznmgzKAaFpzitH19m-Xi9ZlbniDBkfzY9SdB-mg3VJ-fuawz2PZb9xNOAiNDqDRNrQ",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+            },
+            "arguments": {
+              "workspaceId": "0123456789abcdef0123456789abcdef",
+              "language": "python",
+              "code": "print('\u003ca\u003e \u0026 é')",
+              "timeoutSeconds": 5.0
+            },
+            "name": "sandbox_run"
+          },
+          "now": "2026-11-19T12:00:20Z",
+          "expect": {
+            "outcome": "refuse",
+            "reason": "expired"
+          }
+        }
+      ]
+    },
+    {
+      "name": "refused-no-issued-at",
+      "description": "No iat claim.",
+      "origin": "forged",
+      "steps": [
+        {
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.idp.telos/caller": {
+                "subject": "svc-operator",
+                "tenant": "t1",
+                "roles": [
+                  "operator"
+                ],
+                "client": "idp-host",
+                "actor": "idp-host"
+              },
+              "io.idp.telos/caller-assertion": "eyJhbGciOiJFUzI1NiIsImtpZCI6IlVScHhuTHBLV3FDbFZxV0pUR3owTXo4enhLR2MxOS1hNEEyV0Y5MTJEaTgiLCJ0eXAiOiJpZHAtY2FsbGVyK2p3dCJ9.eyJhY3RvciI6ImlkcC1ob3N0IiwiYXVkIjoiaHR0cDovL3NhbmRib3g6ODU3MC9tY3AiLCJjbGllbnQiOiJpZHAtaG9zdCIsImV4cCI6MTc5NTA4OTY2MCwiaXNzIjoiaWRwLW1jcC1nYXRld2F5OmcxIiwianRpIjoiZm9yZ2VkLTU3MDQiLCJyZXEiOiJzaGEyNTY6ODg1MWI0NDUxOWI2YzA0ODA4OGJmZDY2MDkwNTgxYjQzM2I3NDg5MjU3NTAxYmIyYTkxZTE3ZTBlODRhNWIzMyIsInJvbGVzIjpbIm9wZXJhdG9yIl0sInN1YiI6InN2Yy1vcGVyYXRvciIsInRlbmFudF9pZCI6InQxIn0.NGyoq2pj0Dik4dO6XUib0TYudAf4cw68eZX1UYlLEDPV20lvyRJ5UhwMOuTwCv-Q-fSTlmM88Bj6tXLTlUqdkw",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+            },
+            "arguments": {
+              "workspaceId": "0123456789abcdef0123456789abcdef",
+              "language": "python",
+              "code": "print('\u003ca\u003e \u0026 é')",
+              "timeoutSeconds": 5.0
+            },
+            "name": "sandbox_run"
+          },
+          "now": "2026-11-19T12:00:20Z",
+          "expect": {
+            "outcome": "refuse",
+            "reason": "issued_in_future"
+          }
+        }
+      ]
+    },
+    {
+      "name": "refused-empty-subject",
+      "description": "sub is the empty string.",
+      "origin": "forged",
+      "steps": [
+        {
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.idp.telos/caller": {
+                "subject": "svc-operator",
+                "tenant": "t1",
+                "roles": [
+                  "operator"
+                ],
+                "client": "idp-host",
+                "actor": "idp-host"
+              },
+              "io.idp.telos/caller-assertion": "eyJhbGciOiJFUzI1NiIsImtpZCI6IlVScHhuTHBLV3FDbFZxV0pUR3owTXo4enhLR2MxOS1hNEEyV0Y5MTJEaTgiLCJ0eXAiOiJpZHAtY2FsbGVyK2p3dCJ9.eyJhY3RvciI6ImlkcC1ob3N0IiwiYXVkIjoiaHR0cDovL3NhbmRib3g6ODU3MC9tY3AiLCJjbGllbnQiOiJpZHAtaG9zdCIsImV4cCI6MTc5NTA4OTY2MCwiaWF0IjoxNzk1MDg5NjAwLCJpc3MiOiJpZHAtbWNwLWdhdGV3YXk6ZzEiLCJqdGkiOiJmb3JnZWQtNTcwNSIsInJlcSI6InNoYTI1Njo4ODUxYjQ0NTE5YjZjMDQ4MDg4YmZkNjYwOTA1ODFiNDMzYjc0ODkyNTc1MDFiYjJhOTFlMTdlMGU4NGE1YjMzIiwicm9sZXMiOlsib3BlcmF0b3IiXSwic3ViIjoiIiwidGVuYW50X2lkIjoidDEifQ.WDmfV_8o2KytcUS2UFy3MaqBTIgDndVOq2in22LcmA33_Ng1JCLrKH6agt5FTKsSGFzNln290zzPTc_djaQ2rQ",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+            },
+            "arguments": {
+              "workspaceId": "0123456789abcdef0123456789abcdef",
+              "language": "python",
+              "code": "print('\u003ca\u003e \u0026 é')",
+              "timeoutSeconds": 5.0
+            },
+            "name": "sandbox_run"
+          },
+          "now": "2026-11-19T12:00:20Z",
+          "expect": {
+            "outcome": "refuse",
+            "reason": "missing_claim"
+          }
+        }
+      ]
+    },
+    {
+      "name": "refused-empty-jti",
+      "description": "jti is the empty string.",
+      "origin": "forged",
+      "steps": [
+        {
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.idp.telos/caller": {
+                "subject": "svc-operator",
+                "tenant": "t1",
+                "roles": [
+                  "operator"
+                ],
+                "client": "idp-host",
+                "actor": "idp-host"
+              },
+              "io.idp.telos/caller-assertion": "eyJhbGciOiJFUzI1NiIsImtpZCI6IlVScHhuTHBLV3FDbFZxV0pUR3owTXo4enhLR2MxOS1hNEEyV0Y5MTJEaTgiLCJ0eXAiOiJpZHAtY2FsbGVyK2p3dCJ9.eyJhY3RvciI6ImlkcC1ob3N0IiwiYXVkIjoiaHR0cDovL3NhbmRib3g6ODU3MC9tY3AiLCJjbGllbnQiOiJpZHAtaG9zdCIsImV4cCI6MTc5NTA4OTY2MCwiaWF0IjoxNzk1MDg5NjAwLCJpc3MiOiJpZHAtbWNwLWdhdGV3YXk6ZzEiLCJqdGkiOiIiLCJyZXEiOiJzaGEyNTY6ODg1MWI0NDUxOWI2YzA0ODA4OGJmZDY2MDkwNTgxYjQzM2I3NDg5MjU3NTAxYmIyYTkxZTE3ZTBlODRhNWIzMyIsInJvbGVzIjpbIm9wZXJhdG9yIl0sInN1YiI6InN2Yy1vcGVyYXRvciIsInRlbmFudF9pZCI6InQxIn0.EHngZ1iBzgsdUSZMTqi3Rro_c16Wqcg_a4QKYa0KPnADMo8f69MQd0BRTObnQqRNTIL_vy2Y_sWe6YLBT8vcXQ",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+            },
+            "arguments": {
+              "workspaceId": "0123456789abcdef0123456789abcdef",
+              "language": "python",
+              "code": "print('\u003ca\u003e \u0026 é')",
+              "timeoutSeconds": 5.0
+            },
+            "name": "sandbox_run"
+          },
+          "now": "2026-11-19T12:00:20Z",
+          "expect": {
+            "outcome": "refuse",
+            "reason": "missing_claim"
+          }
+        }
+      ]
+    },
+    {
+      "name": "refused-no-jti",
+      "description": "No jti claim.",
+      "origin": "forged",
+      "steps": [
+        {
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.idp.telos/caller": {
+                "subject": "svc-operator",
+                "tenant": "t1",
+                "roles": [
+                  "operator"
+                ],
+                "client": "idp-host",
+                "actor": "idp-host"
+              },
+              "io.idp.telos/caller-assertion": "eyJhbGciOiJFUzI1NiIsImtpZCI6IlVScHhuTHBLV3FDbFZxV0pUR3owTXo4enhLR2MxOS1hNEEyV0Y5MTJEaTgiLCJ0eXAiOiJpZHAtY2FsbGVyK2p3dCJ9.eyJhY3RvciI6ImlkcC1ob3N0IiwiYXVkIjoiaHR0cDovL3NhbmRib3g6ODU3MC9tY3AiLCJjbGllbnQiOiJpZHAtaG9zdCIsImV4cCI6MTc5NTA4OTY2MCwiaWF0IjoxNzk1MDg5NjAwLCJpc3MiOiJpZHAtbWNwLWdhdGV3YXk6ZzEiLCJyZXEiOiJzaGEyNTY6ODg1MWI0NDUxOWI2YzA0ODA4OGJmZDY2MDkwNTgxYjQzM2I3NDg5MjU3NTAxYmIyYTkxZTE3ZTBlODRhNWIzMyIsInJvbGVzIjpbIm9wZXJhdG9yIl0sInN1YiI6InN2Yy1vcGVyYXRvciIsInRlbmFudF9pZCI6InQxIn0.QCVTXmGO5ja0Zdb1QY1enod3XtNH6RwzBZKXwowDi8oDMj0EpJUVx9z0xb0rNmZCpHEaXOjpVFe2ZYV-2n1IRA",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+            },
+            "arguments": {
+              "workspaceId": "0123456789abcdef0123456789abcdef",
+              "language": "python",
+              "code": "print('\u003ca\u003e \u0026 é')",
+              "timeoutSeconds": 5.0
+            },
+            "name": "sandbox_run"
+          },
+          "now": "2026-11-19T12:00:20Z",
+          "expect": {
+            "outcome": "refuse",
+            "reason": "missing_claim"
+          }
+        }
+      ]
+    },
+    {
+      "name": "refused-no-request-digest",
+      "description": "No req claim.",
+      "origin": "forged",
+      "steps": [
+        {
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.idp.telos/caller": {
+                "subject": "svc-operator",
+                "tenant": "t1",
+                "roles": [
+                  "operator"
+                ],
+                "client": "idp-host",
+                "actor": "idp-host"
+              },
+              "io.idp.telos/caller-assertion": "eyJhbGciOiJFUzI1NiIsImtpZCI6IlVScHhuTHBLV3FDbFZxV0pUR3owTXo4enhLR2MxOS1hNEEyV0Y5MTJEaTgiLCJ0eXAiOiJpZHAtY2FsbGVyK2p3dCJ9.eyJhY3RvciI6ImlkcC1ob3N0IiwiYXVkIjoiaHR0cDovL3NhbmRib3g6ODU3MC9tY3AiLCJjbGllbnQiOiJpZHAtaG9zdCIsImV4cCI6MTc5NTA4OTY2MCwiaWF0IjoxNzk1MDg5NjAwLCJpc3MiOiJpZHAtbWNwLWdhdGV3YXk6ZzEiLCJqdGkiOiJmb3JnZWQtNTcwOCIsInJvbGVzIjpbIm9wZXJhdG9yIl0sInN1YiI6InN2Yy1vcGVyYXRvciIsInRlbmFudF9pZCI6InQxIn0.0Ynor2xlaRg4pn8Hv405txSMrDKu9kc9udOqfC4t_qQimm38aaQj8HdywCtU4PgZFQopvx7b9SYedarfQQfRCg",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+            },
+            "arguments": {
+              "workspaceId": "0123456789abcdef0123456789abcdef",
+              "language": "python",
+              "code": "print('\u003ca\u003e \u0026 é')",
+              "timeoutSeconds": 5.0
+            },
+            "name": "sandbox_run"
+          },
+          "now": "2026-11-19T12:00:20Z",
+          "expect": {
+            "outcome": "refuse",
+            "reason": "request_mismatch"
+          }
+        }
+      ]
+    },
+    {
+      "name": "refused-params-changed-after-signing",
+      "description": "The gateway's assertion presented with other arguments than the ones it signed.",
+      "origin": "gateway",
+      "steps": [
+        {
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.idp.telos/caller": {
+                "subject": "svc-operator",
+                "tenant": "t1",
+                "roles": [
+                  "operator"
+                ],
+                "client": "idp-host",
+                "actor": "idp-host"
+              },
+              "io.idp.telos/caller-assertion": "eyJhbGciOiJFUzI1NiIsImtpZCI6IlVScHhuTHBLV3FDbFZxV0pUR3owTXo4enhLR2MxOS1hNEEyV0Y5MTJEaTgiLCJ0eXAiOiJpZHAtY2FsbGVyK2p3dCJ9.eyJhY3RvciI6ImlkcC1ob3N0IiwiYXVkIjoiaHR0cDovL3NhbmRib3g6ODU3MC9tY3AiLCJjbGllbnQiOiJpZHAtaG9zdCIsImV4cCI6MTc5NTA4OTY2MCwiaWF0IjoxNzk1MDg5NjAwLCJpc3MiOiJpZHAtbWNwLWdhdGV3YXk6ZzEiLCJqdGkiOiJyd3dRSWREdXkzTGpwWjFsIiwicmVxIjoic2hhMjU2Ojg4NTFiNDQ1MTliNmMwNDgwODhiZmQ2NjA5MDU4MWI0MzNiNzQ4OTI1NzUwMWJiMmE5MWUxN2UwZTg0YTViMzMiLCJyb2xlcyI6WyJvcGVyYXRvciJdLCJzdWIiOiJzdmMtb3BlcmF0b3IiLCJ0ZW5hbnRfaWQiOiJ0MSJ9.h_pbh8oz2ZCJ-JeHVP9GI8QNPVWjfreCvQap2Olsxjke5AadNQh0zcl-tMmPw56w70ey4q32EHnUE2cOKIUkzg",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+            },
+            "arguments": {
+              "workspaceId": "0123456789abcdef0123456789abcdef",
+              "language": "python",
+              "code": "exfiltrate('\u003ca\u003e \u0026 é')",
+              "timeoutSeconds": 5.0
+            },
+            "name": "sandbox_run"
+          },
+          "signedRequest": {
+            "method": "tools/call",
+            "params": {
+              "_meta": {
+                "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                "io.modelcontextprotocol/clientCapabilities": {}
+              },
+              "arguments": {
+                "workspaceId": "0123456789abcdef0123456789abcdef",
+                "language": "python",
+                "code": "print('\u003ca\u003e \u0026 é')",
+                "timeoutSeconds": 5.0
+              },
+              "name": "sandbox_run"
+            }
+          },
+          "now": "2026-11-19T12:00:20Z",
+          "expect": {
+            "outcome": "refuse",
+            "reason": "request_mismatch"
+          }
+        }
+      ]
+    },
+    {
+      "name": "refused-another-method-than-signed",
+      "description": "An assertion the gateway made for resources/read, presented on tools/call with the same params.",
+      "origin": "gateway",
+      "steps": [
+        {
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.idp.telos/caller": {
+                "subject": "svc-operator",
+                "tenant": "t1",
+                "roles": [
+                  "operator"
+                ],
+                "client": "idp-host",
+                "actor": "idp-host"
+              },
+              "io.idp.telos/caller-assertion": "eyJhbGciOiJFUzI1NiIsImtpZCI6IlVScHhuTHBLV3FDbFZxV0pUR3owTXo4enhLR2MxOS1hNEEyV0Y5MTJEaTgiLCJ0eXAiOiJpZHAtY2FsbGVyK2p3dCJ9.eyJhY3RvciI6ImlkcC1ob3N0IiwiYXVkIjoiaHR0cDovL3NhbmRib3g6ODU3MC9tY3AiLCJjbGllbnQiOiJpZHAtaG9zdCIsImV4cCI6MTc5NTA4OTY2MCwiaWF0IjoxNzk1MDg5NjAwLCJpc3MiOiJpZHAtbWNwLWdhdGV3YXk6ZzEiLCJqdGkiOiJQTERsUjVqUmhwUEtIb2s0IiwicmVxIjoic2hhMjU2OjYwMWRhZWE4ZGI2NWEyMDdlMDRlYzA4MzNjMmNmMjQyMjNmYzVhNDY4YjMwM2U4ZmNjYTFlNjEwYmY5ZjM2NGUiLCJyb2xlcyI6WyJvcGVyYXRvciJdLCJzdWIiOiJzdmMtb3BlcmF0b3IiLCJ0ZW5hbnRfaWQiOiJ0MSJ9.sBphWe7iMqVOwKcia9Sp4fDFiaEsJYToVFb6amJioxOy8nvjW5dpbwjpjScr6UU5fGJnxiovdGRzUZtGo1J6bg",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+            },
+            "arguments": {
+              "workspaceId": "0123456789abcdef0123456789abcdef",
+              "language": "python",
+              "code": "print('\u003ca\u003e \u0026 é')",
+              "timeoutSeconds": 5.0
+            },
+            "name": "sandbox_run"
+          },
+          "signedRequest": {
+            "method": "resources/read",
+            "params": {
+              "_meta": {
+                "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                "io.modelcontextprotocol/clientCapabilities": {}
+              },
+              "arguments": {
+                "workspaceId": "0123456789abcdef0123456789abcdef",
+                "language": "python",
+                "code": "print('\u003ca\u003e \u0026 é')",
+                "timeoutSeconds": 5.0
+              },
+              "name": "sandbox_run"
+            }
+          },
+          "now": "2026-11-19T12:00:20Z",
+          "expect": {
+            "outcome": "refuse",
+            "reason": "request_mismatch"
+          }
+        }
+      ]
+    },
+    {
+      "name": "refused-replay",
+      "description": "The same assertion presented twice: the first is accepted, the second is refused.",
+      "origin": "gateway",
+      "steps": [
+        {
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.idp.telos/caller": {
+                "subject": "svc-operator",
+                "tenant": "t1",
+                "roles": [
+                  "operator"
+                ],
+                "client": "idp-host",
+                "actor": "idp-host"
+              },
+              "io.idp.telos/caller-assertion": "eyJhbGciOiJFUzI1NiIsImtpZCI6IlVScHhuTHBLV3FDbFZxV0pUR3owTXo4enhLR2MxOS1hNEEyV0Y5MTJEaTgiLCJ0eXAiOiJpZHAtY2FsbGVyK2p3dCJ9.eyJhY3RvciI6ImlkcC1ob3N0IiwiYXVkIjoiaHR0cDovL3NhbmRib3g6ODU3MC9tY3AiLCJjbGllbnQiOiJpZHAtaG9zdCIsImV4cCI6MTc5NTA4OTY2MCwiaWF0IjoxNzk1MDg5NjAwLCJpc3MiOiJpZHAtbWNwLWdhdGV3YXk6ZzEiLCJqdGkiOiJyd3dRSWREdXkzTGpwWjFsIiwicmVxIjoic2hhMjU2Ojg4NTFiNDQ1MTliNmMwNDgwODhiZmQ2NjA5MDU4MWI0MzNiNzQ4OTI1NzUwMWJiMmE5MWUxN2UwZTg0YTViMzMiLCJyb2xlcyI6WyJvcGVyYXRvciJdLCJzdWIiOiJzdmMtb3BlcmF0b3IiLCJ0ZW5hbnRfaWQiOiJ0MSJ9.h_pbh8oz2ZCJ-JeHVP9GI8QNPVWjfreCvQap2Olsxjke5AadNQh0zcl-tMmPw56w70ey4q32EHnUE2cOKIUkzg",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+            },
+            "arguments": {
+              "workspaceId": "0123456789abcdef0123456789abcdef",
+              "language": "python",
+              "code": "print('\u003ca\u003e \u0026 é')",
+              "timeoutSeconds": 5.0
+            },
+            "name": "sandbox_run"
+          },
+          "now": "2026-11-19T12:00:20Z",
+          "expect": {
+            "outcome": "accept",
+            "caller": {
+              "subject": "svc-operator",
+              "tenant": "t1",
+              "roles": [
+                "operator"
+              ],
+              "client": "idp-host",
+              "actor": "idp-host"
+            }
+          }
+        },
+        {
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.idp.telos/caller": {
+                "subject": "svc-operator",
+                "tenant": "t1",
+                "roles": [
+                  "operator"
+                ],
+                "client": "idp-host",
+                "actor": "idp-host"
+              },
+              "io.idp.telos/caller-assertion": "eyJhbGciOiJFUzI1NiIsImtpZCI6IlVScHhuTHBLV3FDbFZxV0pUR3owTXo4enhLR2MxOS1hNEEyV0Y5MTJEaTgiLCJ0eXAiOiJpZHAtY2FsbGVyK2p3dCJ9.eyJhY3RvciI6ImlkcC1ob3N0IiwiYXVkIjoiaHR0cDovL3NhbmRib3g6ODU3MC9tY3AiLCJjbGllbnQiOiJpZHAtaG9zdCIsImV4cCI6MTc5NTA4OTY2MCwiaWF0IjoxNzk1MDg5NjAwLCJpc3MiOiJpZHAtbWNwLWdhdGV3YXk6ZzEiLCJqdGkiOiJyd3dRSWREdXkzTGpwWjFsIiwicmVxIjoic2hhMjU2Ojg4NTFiNDQ1MTliNmMwNDgwODhiZmQ2NjA5MDU4MWI0MzNiNzQ4OTI1NzUwMWJiMmE5MWUxN2UwZTg0YTViMzMiLCJyb2xlcyI6WyJvcGVyYXRvciJdLCJzdWIiOiJzdmMtb3BlcmF0b3IiLCJ0ZW5hbnRfaWQiOiJ0MSJ9.h_pbh8oz2ZCJ-JeHVP9GI8QNPVWjfreCvQap2Olsxjke5AadNQh0zcl-tMmPw56w70ey4q32EHnUE2cOKIUkzg",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+            },
+            "arguments": {
+              "workspaceId": "0123456789abcdef0123456789abcdef",
+              "language": "python",
+              "code": "print('\u003ca\u003e \u0026 é')",
+              "timeoutSeconds": 5.0
+            },
+            "name": "sandbox_run"
+          },
+          "now": "2026-11-19T12:00:25Z",
+          "expect": {
+            "outcome": "refuse",
+            "reason": "replay"
+          }
+        }
+      ]
+    },
+    {
+      "name": "refused-replay-of-an-id-on-another-request",
+      "description": "A jti is spent for every request: a second assertion with the same jti is refused although it is for a different request.",
+      "origin": "forged",
+      "steps": [
+        {
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.idp.telos/caller": {
+                "subject": "svc-operator",
+                "tenant": "t1",
+                "roles": [
+                  "operator"
+                ],
+                "client": "idp-host",
+                "actor": "idp-host"
+              },
+              "io.idp.telos/caller-assertion": "eyJhbGciOiJFUzI1NiIsImtpZCI6IlVScHhuTHBLV3FDbFZxV0pUR3owTXo4enhLR2MxOS1hNEEyV0Y5MTJEaTgiLCJ0eXAiOiJpZHAtY2FsbGVyK2p3dCJ9.eyJhY3RvciI6ImlkcC1ob3N0IiwiYXVkIjoiaHR0cDovL3NhbmRib3g6ODU3MC9tY3AiLCJjbGllbnQiOiJpZHAtaG9zdCIsImV4cCI6MTc5NTA4OTY2MCwiaWF0IjoxNzk1MDg5NjAwLCJpc3MiOiJpZHAtbWNwLWdhdGV3YXk6ZzEiLCJqdGkiOiJmb3JnZWQtcmV1c2VkIiwicmVxIjoic2hhMjU2Ojg4NTFiNDQ1MTliNmMwNDgwODhiZmQ2NjA5MDU4MWI0MzNiNzQ4OTI1NzUwMWJiMmE5MWUxN2UwZTg0YTViMzMiLCJyb2xlcyI6WyJvcGVyYXRvciJdLCJzdWIiOiJzdmMtb3BlcmF0b3IiLCJ0ZW5hbnRfaWQiOiJ0MSJ9.6dgQlvLfYa9sBC5Xdc1NcEt4G0qgpnJnR0-r6815BcPnp6wd9-tytiIqfnyU8R7Nn7oU_K2tu2E24CcybgKH2g",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+            },
+            "arguments": {
+              "workspaceId": "0123456789abcdef0123456789abcdef",
+              "language": "python",
+              "code": "print('\u003ca\u003e \u0026 é')",
+              "timeoutSeconds": 5.0
+            },
+            "name": "sandbox_run"
+          },
+          "now": "2026-11-19T12:00:20Z",
+          "expect": {
+            "outcome": "accept",
+            "caller": {
+              "subject": "svc-operator",
+              "tenant": "t1",
+              "roles": [
+                "operator"
+              ],
+              "client": "idp-host",
+              "actor": "idp-host"
+            }
+          }
+        },
+        {
+          "method": "tools/call",
+          "params": {
+            "_meta": {
+              "io.idp.telos/caller": {
+                "subject": "svc-operator",
+                "tenant": "t1",
+                "roles": [
+                  "operator"
+                ],
+                "client": "idp-host",
+                "actor": "idp-host"
+              },
+              "io.idp.telos/caller-assertion": "eyJhbGciOiJFUzI1NiIsImtpZCI6IlVScHhuTHBLV3FDbFZxV0pUR3owTXo4enhLR2MxOS1hNEEyV0Y5MTJEaTgiLCJ0eXAiOiJpZHAtY2FsbGVyK2p3dCJ9.eyJhY3RvciI6ImlkcC1ob3N0IiwiYXVkIjoiaHR0cDovL3NhbmRib3g6ODU3MC9tY3AiLCJjbGllbnQiOiJpZHAtaG9zdCIsImV4cCI6MTc5NTA4OTY2MCwiaWF0IjoxNzk1MDg5NjAwLCJpc3MiOiJpZHAtbWNwLWdhdGV3YXk6ZzEiLCJqdGkiOiJmb3JnZWQtcmV1c2VkIiwicmVxIjoic2hhMjU2OjI5NTA1OTRkODhkYTQ5MmFhNjJjZmE2MmQ2M2E4OGNiZjc4ODlkMjU5NTY3MjIyYWQ4MjI0N2ZmODNjNjkyOGEiLCJyb2xlcyI6WyJvcGVyYXRvciJdLCJzdWIiOiJzdmMtb3BlcmF0b3IiLCJ0ZW5hbnRfaWQiOiJ0MSJ9.4SXka8CfBRFgt4AVTqsrAJ7lOVGimkWG3bBMgyYMDynVhcGsZdkJbwkaJ1Ge-4O5FcvBwJA0-baca6us0gAyMA",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+            },
+            "arguments": {
+              "workspaceId": "0123456789abcdef0123456789abcdef",
+              "language": "python",
+              "code": "print(2)",
+              "timeoutSeconds": 5.0
+            },
+            "name": "sandbox_run"
+          },
+          "now": "2026-11-19T12:00:25Z",
+          "expect": {
+            "outcome": "refuse",
+            "reason": "replay"
+          }
+        }
+      ]
+    }
+  ]
+}
