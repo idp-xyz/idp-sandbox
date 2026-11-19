@@ -31,8 +31,12 @@ services:
   mcp-gateway:
     environment:
       IDP_GATEWAY_CALLER_KEY_FILE: /etc/idp/caller.key   # signs the caller it forwards (idp-mcp D44)
+      # the OAuth clients the gateway serves (idp-mcp ADR-0001 D46), which deploy/e2e.sh writes next to the keys; it replaces the
+      # mount idp-mcp's own compose file has at this path, and a gateway that predates the setting ignores the variable
+      IDP_GATEWAY_CLIENTS_FILE: /etc/idp/clients.yaml
     volumes:
       - ${IDP_CALLER_KEYS:?run deploy/e2e.sh}/gateway.key:/etc/idp/caller.key:ro
+      - ${IDP_CALLER_KEYS:?run deploy/e2e.sh}/gateway-clients.yaml:/etc/idp/clients.yaml:ro
   # OPTIONAL (docker compose --profile egress): the allow-listed egress proxy and the sandbox pointed at it, which
   # adds the network=egress option to sandbox_run (a change of the tool's schema: the gateway pins it, so discover
   # and re-approve the server). IDP_EGRESS_HOSTS is the allow-list (exact names or *.suffix); empty denies all.

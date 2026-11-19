@@ -25,7 +25,12 @@ openssl ecparam -name prime256v1 -genkey -noout -out "$KEYS/gateway.key" 2>/dev/
 openssl ec -in "$KEYS/gateway.key" -pubout -out "$KEYS/gateway.pub" 2>/dev/null
 # the key the sandbox and its egress proxy share (D21): used with --profile egress, made every time so the mount has a source
 openssl rand -hex 32 > "$KEYS/egress.key"
-chmod 755 "$KEYS"; chmod 644 "$KEYS/gateway.key" "$KEYS/gateway.pub" "$KEYS/egress.key"
+# the OAuth clients the gateway serves (idp-mcp ADR-0001 D46): it does not start without the file. This development script opts out
+# on purpose, with the wildcard (every client is a platform client: client authorization OFF), because it calls the gateway with
+# API keys the registry creates after the gateway has started, whose client ids ("api-key:<id>") cannot be listed beforehand. A
+# deployment lists its clients and does not use the wildcard. An idp-mcp that predates the setting ignores the file.
+printf 'clients:\n  "*": platform   # development only: client authorization off\n' > "$KEYS/gateway-clients.yaml"
+chmod 755 "$KEYS"; chmod 644 "$KEYS/gateway.key" "$KEYS/gateway.pub" "$KEYS/egress.key" "$KEYS/gateway-clients.yaml"
 echo "IDP_CALLER_KEYS=$KEYS" >> "$ENVF"
 set -a; source "$ENVF"; set +a
 export IDP_IMAGE="${IDP_IMAGE:-idp-mcp:dev}" IDP_SANDBOX_IMAGE="${IDP_SANDBOX_IMAGE:-idp-sandbox:dev}"
