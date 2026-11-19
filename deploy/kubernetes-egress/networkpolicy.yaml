@@ -28,7 +28,9 @@ spec:
         - {protocol: TCP, port: 3128}
 ---
 # The proxy: in from those runs only; out to DNS (allow-dns of the namespace) and to public addresses on the ports the
-# allow-lists use. The proxy itself refuses private, loopback, link-local and metadata addresses; this is the same
+# allow-lists use. The proxy itself refuses every address the IANA special-purpose registries mark as not globally
+# reachable (private, loopback, link-local, metadata, CGNAT, documentation, benchmarking, reserved, multicast: D22);
+# the excepts below are its IPv4 part, and tests/deploy compares the two over the whole IPv4 space. This is the same
 # refusal made by the cluster, so that a bug or a misconfiguration of the proxy does not open the cluster or the
 # operator's network. If the cluster's pod, service or node addresses are not in the ranges excluded below, add them.
 # IPv4 only: with no IPv6 rule the proxy reaches no IPv6 address (it then uses a host's IPv4 one); a cluster that needs
@@ -65,8 +67,14 @@ spec:
               - 127.0.0.0/8
               - 169.254.0.0/16
               - 172.16.0.0/12
+              - 192.0.0.0/24
+              - 192.0.2.0/24
+              - 192.88.99.0/24
               - 192.168.0.0/16
-              - 224.0.0.0/3
+              - 198.18.0.0/15
+              - 198.51.100.0/24
+              - 203.0.113.0/24
+              - 224.0.0.0/3                  # multicast and 240.0.0.0/4, with 255.255.255.255
       ports:                             # the ports of tenants.yaml (443 and 80 unless it says otherwise)
         - {protocol: TCP, port: 443}
         - {protocol: TCP, port: 80}

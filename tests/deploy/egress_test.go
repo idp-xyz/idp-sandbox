@@ -186,23 +186,33 @@ func TestEgressProxyTakesOnlyEgressRunsAndReachesOnlyPublicAddresses(t *testing.
 	for _, c := range list(to, "ipBlock", "except") {
 		except = append(except, netip.MustParsePrefix(c.(string)))
 	}
-	// whatever the proxy itself refuses to connect to, the cluster refuses too
-	for _, a := range []string{"0.0.0.0", "10.0.0.1", "10.96.0.1", "10.255.255.254", "100.64.0.1", "100.127.255.254", "127.0.0.1", "169.254.169.254",
-		"172.16.0.1", "172.18.0.2", "172.31.255.254", "192.168.0.1", "192.168.255.254", "224.0.0.1", "239.255.255.250", "255.255.255.255"} {
-		addr := netip.MustParseAddr(a)
-		var out bool
+	excluded := func(addr netip.Addr) bool {
 		for _, e := range except {
-			out = out || e.Contains(addr)
+			if e.Contains(addr) {
+				return true
+			}
 		}
-		if !out {
-			t.Errorf("%s is not excluded (the proxy's own check refuses it: %v)", a, egress.Blocked(addr))
+		return false
+	}
+	// whatever the proxy itself refuses to connect to, the cluster refuses too, and nothing else (D22): every /24 of the
+	// IPv4 space is compared (the smallest special-purpose block is a /24, 192.0.0.9 and 192.0.0.10 are refused with
+	// their /24), so a block added to the proxy's table and not to the excepts is found, and so is an except that
+	// cuts off public addresses
+	for n := uint64(0); n < 1<<32; n += 256 {
+		addr := netip.AddrFrom4([4]byte{byte(n >> 24), byte(n >> 16), byte(n >> 8), 0})
+		if refused := egress.Blocked(addr); refused != excluded(addr) {
+			t.Fatalf("%s: the proxy refuses it: %v; the policy excludes it: %v", addr, refused, excluded(addr))
 		}
 	}
-	for _, a := range []string{"1.1.1.1", "93.184.216.34", "151.101.0.223", "203.0.113.20"} {
-		for _, e := range except {
-			if e.Contains(netip.MustParseAddr(a)) {
-				t.Errorf("the public address %s is excluded by %s", a, e)
-			}
+	for _, a := range []string{"0.0.0.0", "10.255.255.254", "100.127.255.254", "127.0.0.1", "169.254.169.254", "172.31.255.254", "192.0.0.9", "192.0.0.10",
+		"192.168.255.254", "198.19.255.254", "239.255.255.250", "240.0.0.1", "255.255.255.255"} {
+		if addr := netip.MustParseAddr(a); !excluded(addr) || !egress.Blocked(addr) {
+			t.Errorf("%s: excluded %v, refused by the proxy %v", a, excluded(addr), egress.Blocked(addr))
+		}
+	}
+	for _, a := range []string{"1.1.1.1", "93.184.216.34", "151.101.0.223", "192.31.196.1"} {
+		if excluded(netip.MustParseAddr(a)) {
+			t.Errorf("the public address %s is excluded", a)
 		}
 	}
 	if len(list(eg[0], "ports")) == 0 {

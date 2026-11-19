@@ -46,9 +46,75 @@ func TestBlockedAddresses(t *testing.T) {
 			t.Errorf("%s was not blocked", a)
 		}
 	}
-	for _, a := range []string{"1.1.1.1", "8.8.8.8", "93.184.216.34", "2606:4700:4700::1111", "172.32.0.1"} {
+	for _, a := range []string{"1.1.1.1", "8.8.8.8", "93.184.216.34", "2606:4700:4700::1111", "2a00:1450:4001::1", "172.32.0.1"} {
 		if Blocked(netip.MustParseAddr(a)) {
 			t.Errorf("%s was blocked", a)
+		}
+	}
+}
+
+// The addresses a review found the list of refused addresses let through (D22): every block the IANA special-purpose
+// registries mark as not globally reachable, and the IPv6 blocks that carry an IPv4 address.
+func TestEveryAddressTheIANARegistriesMarkNotGloballyReachableIsBlocked(t *testing.T) {
+	for _, a := range []string{
+		"0.1.2.3", "0.255.255.255", "240.0.0.1", "250.1.1.1", "255.255.255.254", "255.255.255.255", // 0.0.0.0/8 beyond 0.0.0.0, 240.0.0.0/4
+		"198.18.0.1", "198.19.255.254", "192.0.0.1", "192.0.0.9", "192.0.0.170", // benchmarking, IETF protocol assignments
+		"192.0.2.1", "198.51.100.7", "203.0.113.20", "2001:db8::1", "2001:db8:ffff::1", // documentation
+		"192.88.99.1",                                                           // deprecated 6to4 relay anycast
+		"64:ff9b::7f00:1", "64:ff9b::a00:1", "64:ff9b::808:808", "64:ff9b:1::1", // NAT64
+		"2002:7f00:1::", "2002:a00:1::1", "2002:808:808::", // 6to4
+		"2001:0:4136:e378:8000:63bf:3fff:fdd2",                    // Teredo
+		"2001:10::1", "2001:2::1", "100::1", "5f00::1", "3fff::1", // ORCHID, benchmarking, discard-only, SRv6, documentation
+		"fec0::1", "fe80::1", "fd00::1", "ff02::1", "::ffff:0:102:304", "::102:304", "2001:1::1", "2001:20::1", // site-local, unique-local, multicast, translated and compatible, inside 2001::/23
+	} {
+		if !Blocked(netip.MustParseAddr(a)) {
+			t.Errorf("%s was not blocked", a)
+		}
+	}
+}
+
+// A zone names a local interface ("fe80::1%eth0"), and nothing a run should reach is addressed that way, so every
+// zoned address is refused, global ones included (D22). netip.Prefix.Contains is false for any zoned address, so a
+// table lookup alone would let these through.
+func TestEveryZonedAddressIsBlocked(t *testing.T) {
+	for _, a := range []string{"fe80::1%eth0", "fd00::5%eth0", "::1%lo", "ff02::1%eth0", "2606:4700:4700::1111%eth0", "2001:db8::1%eth0"} {
+		if !Blocked(netip.MustParseAddr(a)) {
+			t.Errorf("%s was not blocked", a)
+		}
+	}
+}
+
+func TestPublicAddressesNextToTheSpecialPurposeBlocksAreNotBlocked(t *testing.T) {
+	for _, a := range []string{"1.1.1.1", "8.8.8.8", "9.255.255.255", "11.0.0.1", "93.184.216.34", "100.63.255.255", "100.128.0.1", "126.255.255.255", "128.0.0.1",
+		"172.15.255.255", "172.32.0.1", "192.0.1.1", "192.0.3.1", "192.88.98.1", "192.167.255.255", "192.169.0.1", "198.17.255.255", "198.20.0.1",
+		"198.51.99.1", "198.51.101.1", "203.0.112.1", "203.0.114.1", "223.255.255.255",
+		"2606:4700:4700::1111", "2a00:1450:4001::1", "2001:4860:4860::8888", "2620:fe::fe", "2001:200::1", "192.31.196.1", "192.52.193.1", "192.175.48.1", "2400:cb00::1", "2a03:2880::1"} {
+		if Blocked(netip.MustParseAddr(a)) {
+			t.Errorf("%s was blocked", a)
+		}
+	}
+}
+
+func TestEmbeddedIPv4ShowsWhatATranslatedAddressWouldReach(t *testing.T) {
+	for _, c := range []struct{ v6, v4 string }{
+		{"64:ff9b::7f00:1", "127.0.0.1"},
+		{"64:ff9b::a00:1", "10.0.0.1"},
+		{"2002:7f00:1::", "127.0.0.1"},
+		{"2002:a9fe:a9fe::1", "169.254.169.254"},
+		{"::ffff:10.0.0.1", "10.0.0.1"},
+		{"2001:0:4136:e378:8000:63bf:3fff:fdd2", "192.0.2.45"}, // the Teredo client address is the bitwise complement
+	} {
+		got, ok := EmbeddedIPv4(netip.MustParseAddr(c.v6))
+		if !ok || got != netip.MustParseAddr(c.v4) {
+			t.Errorf("%s: embedded %v (%v), want %s", c.v6, got, ok, c.v4)
+		}
+		if !Blocked(netip.MustParseAddr(c.v6)) {
+			t.Errorf("%s would reach %s and was not blocked", c.v6, c.v4)
+		}
+	}
+	for _, a := range []string{"2606:4700:4700::1111", "1.1.1.1"} {
+		if got, ok := EmbeddedIPv4(netip.MustParseAddr(a)); ok {
+			t.Errorf("%s: embedded %v", a, got)
 		}
 	}
 }

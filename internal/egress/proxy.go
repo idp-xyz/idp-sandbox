@@ -4,7 +4,8 @@
 //
 // It speaks CONNECT (HTTPS) and plain-HTTP forwarding. The decision is made on the host name the client asks
 // for; the connection is then made to an address the proxy resolved itself and checked: loopback, private,
-// link-local (cloud metadata), multicast and unspecified addresses are refused, so an allow-listed name that
+// link-local (cloud metadata), multicast and every other address the IANA special-purpose registries mark as not globally
+// reachable are refused (D22), so an allow-listed name that
 // resolves to the inside of the operator's network, or a DNS rebinding answer, cannot be used to get there.
 package egress
 
@@ -66,13 +67,98 @@ func (p Policy) Allowed(host string, port int) bool {
 	return false
 }
 
-// Blocked reports an address the proxy must never connect to.
+// notGloballyReachable is every block the proxy refuses to connect to (D22). It is not a list someone remembered: it
+// is the IANA IPv4 Special-Purpose Address Registry and the IANA IPv6 Special-Purpose Address Registry, as of
+// 2026-11-19, every entry with "Globally Reachable: False" (or "N/A"), plus the blocks that are not in those tables
+// but are not unicast destinations either (multicast, the reserved 224.0.0.0/3, site-local fec0::/10). A review found
+// that the earlier list missed most of 0.0.0.0/8, 240.0.0.0/4, 198.18.0.0/15, 192.0.0.0/24, the documentation
+// networks and every IPv6 block that carries an IPv4 address.
+//
+// A block that has small globally reachable exceptions is refused whole: 192.0.0.0/24 (192.0.0.9 and 192.0.0.10) and
+// 2001::/23 (PCP and TURN anycast, AMT, AS112, drone remote ID). Nothing a run should reach lives there, and one rule
+// without holes is easier to check than a rule with them. The other globally reachable special-purpose blocks
+// (192.31.196.0/24, 192.52.193.0/24, 192.175.48.0/24, 2620:4f:8000::/48) are left alone: they are public anycast.
+//
+// IPv6 blocks that embed an IPv4 address (IPv4-mapped, SIIT and NAT64, 6to4, Teredo) are refused whole, for the
+// address they would reach, whatever it is: 64:ff9b::7f00:1 and 2002:7f00:1:: reach 127.0.0.1 where such translation
+// exists. EmbeddedIPv4 shows the address.
+var notGloballyReachable = func() []netip.Prefix {
+	var out []netip.Prefix
+	for _, c := range []string{
+		// IPv4 Special-Purpose Address Registry
+		"0.0.0.0/8",       // "this network" (RFC 791)
+		"10.0.0.0/8",      // private use (RFC 1918)
+		"100.64.0.0/10",   // shared address space, carrier-grade NAT (RFC 6598)
+		"127.0.0.0/8",     // loopback (RFC 1122)
+		"169.254.0.0/16",  // link local, which holds the cloud metadata address 169.254.169.254 (RFC 3927)
+		"172.16.0.0/12",   // private use (RFC 1918)
+		"192.0.0.0/24",    // IETF protocol assignments, DS-Lite, NAT64 discovery, whole (RFC 6890)
+		"192.0.2.0/24",    // documentation TEST-NET-1 (RFC 5737)
+		"192.88.99.0/24",  // deprecated 6to4 relay anycast (RFC 7526); the registry marks it deprecated, refused as a transition block
+		"192.168.0.0/16",  // private use (RFC 1918)
+		"198.18.0.0/15",   // benchmarking (RFC 2544)
+		"198.51.100.0/24", // documentation TEST-NET-2 (RFC 5737)
+		"203.0.113.0/24",  // documentation TEST-NET-3 (RFC 5737)
+		"224.0.0.0/3",     // multicast 224.0.0.0/4 and reserved 240.0.0.0/4 with limited broadcast 255.255.255.255 (RFC 1112, RFC 919)
+		// IPv6 Special-Purpose Address Registry
+		"::/8",          // reserved by IETF: unspecified ::, loopback ::1, IPv4-compatible ::/96, IPv4-mapped ::ffff:0:0/96, SIIT ::ffff:0:0:0/96, NAT64 64:ff9b::/96 and 64:ff9b:1::/48
+		"100::/64",      // discard-only (RFC 6666)
+		"2001::/23",     // IETF protocol assignments, whole: Teredo 2001::/32, benchmarking 2001:2::/48, ORCHID, PCP, AMT, AS112 (RFC 6890)
+		"2001:db8::/32", // documentation (RFC 3849)
+		"2002::/16",     // 6to4 (RFC 3056)
+		"3fff::/20",     // documentation (RFC 9637)
+		"5f00::/16",     // segment routing SIDs (RFC 9602)
+		"fc00::/7",      // unique local (RFC 4193)
+		"fe80::/10",     // link local (RFC 4291)
+		"fec0::/10",     // deprecated site-local (RFC 3879)
+		"ff00::/8",      // multicast (RFC 4291)
+	} {
+		out = append(out, netip.MustParsePrefix(c))
+	}
+	return out
+}()
+
+// EmbeddedIPv4 returns the IPv4 address an IPv6 address would reach through a translation mechanism: the IPv4-mapped
+// ::ffff:a.b.c.d, NAT64 64:ff9b::/96 and 64:ff9b:1::/48 (RFC 6052, RFC 8215), 6to4 2002::/16 and the client address of
+// Teredo 2001::/32. The check on those blocks does not depend on it (Blocked refuses them whole); it shows what each
+// would have reached.
+func EmbeddedIPv4(a netip.Addr) (netip.Addr, bool) {
+	a = a.WithZone("") // Prefix.Contains is false for a zoned address
+	if a.Is4In6() {
+		return a.Unmap(), true
+	}
+	if !a.Is6() {
+		return netip.Addr{}, false
+	}
+	b := a.As16()
+	switch {
+	case netip.MustParsePrefix("64:ff9b::/96").Contains(a):
+		return netip.AddrFrom4([4]byte{b[12], b[13], b[14], b[15]}), true
+	case netip.MustParsePrefix("64:ff9b:1::/48").Contains(a): // the /48 layout of RFC 6052: bits 64 to 71 are zero
+		return netip.AddrFrom4([4]byte{b[6], b[7], b[9], b[10]}), true
+	case netip.MustParsePrefix("2002::/16").Contains(a):
+		return netip.AddrFrom4([4]byte{b[2], b[3], b[4], b[5]}), true
+	case netip.MustParsePrefix("2001::/32").Contains(a): // the client's address is stored inverted
+		return netip.AddrFrom4([4]byte{^b[12], ^b[13], ^b[14], ^b[15]}), true
+	}
+	return netip.Addr{}, false
+}
+
+// Blocked reports an address the proxy must never connect to: one that is not globally reachable (D22). An
+// IPv4-mapped address is judged as the IPv4 address it carries.
 func Blocked(a netip.Addr) bool {
 	a = a.Unmap()
-	return !a.IsValid() || a.IsLoopback() || a.IsPrivate() || a.IsLinkLocalUnicast() || a.IsLinkLocalMulticast() ||
-		a.IsMulticast() || a.IsUnspecified() || a.IsInterfaceLocalMulticast() ||
-		// carrier-grade NAT 100.64.0.0/10 and the cloud metadata address
-		netip.MustParsePrefix("100.64.0.0/10").Contains(a) || a == netip.MustParseAddr("169.254.169.254")
+	// A zone names a local interface and Prefix.Contains is false for a zoned address, so a zoned address would pass
+	// every entry of the table: refuse it outright.
+	if !a.IsValid() || a.Zone() != "" {
+		return true
+	}
+	for _, p := range notGloballyReachable {
+		if p.Contains(a) {
+			return true
+		}
+	}
+	return false
 }
 
 // Proxy is the forward proxy.
