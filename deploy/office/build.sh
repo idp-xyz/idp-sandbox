@@ -68,7 +68,8 @@ umask 022
 rm -rf "$OUT" && mkdir -p "$OUT/wheels" "$OUT/fonts"
 cp deploy/office/Dockerfile "$OUT/"
 install -m 0755 "$BIN" "$OUT/officecli"
-for tool in sheetskel pdftext md2pdf; do install -m 0755 "deploy/office/$tool" "$OUT/$tool"; done
+for tool in sheetskel sheetmap sheetcheck pdftext md2pdf; do install -m 0755 "deploy/office/$tool" "$OUT/$tool"; done
+install -m 0644 deploy/office/sheetlib.py "$OUT/sheetlib.py"   # imported by sheetmap and sheetcheck from their own directory
 for pin in "${PINS[@]}"; do
   read -r _ dir file _ <<< "$pin"
   install -m 0644 "$CACHE/$file" "$OUT/$dir/$file"
@@ -83,6 +84,11 @@ got="$(smoke officecli --version)"
 [[ "$got" == "$VERSION" ]] || { echo "office: the image answers '$got', not $VERSION" >&2; exit 1; }
 help="$(smoke sheetskel --help)"
 [[ "$help" == *"FILE.xlsx"* ]] || { echo "office: sheetskel --help answered '$help'" >&2; exit 1; }
+# a workbook is mapped and checked in one command each, with only the standard library
+smap="$(smoke sh -c 'cd /tmp && printf "a" >/dev/null && sheetmap --help && sheetcheck --help')"
+[[ "$smap" == *"sheetmap FILE.xlsx"* && "$smap" == *"sheetcheck OUT.xlsx"* ]] || { echo "office: sheetmap/sheetcheck --help answered '$smap'" >&2; exit 1; }
+smoke sh -c 'cd /tmp && officecli create t.xlsx >/dev/null && sheetmap t.xlsx >/dev/null && sheetcheck t.xlsx | grep -q "VALIDATE"' ||
+  { echo "office: sheetmap and sheetcheck did not run on a workbook officecli made" >&2; exit 1; }
 # a Markdown file with Chinese and a table becomes a PDF and the PDF reads back: the wheels, the fonts and both tools
 pdf="$(smoke sh -c 'cd /tmp && printf "# 报价单\n\n含税总价 **1,280.50** 元。\n\n| 渠道 | 价格 |\n|---|---:|\n| 空运 | 12.5 |\n" > q.md && md2pdf q.md q.pdf >/dev/null && pdftext q.pdf')"
 [[ "$pdf" == "q.pdf: 1 page"* && "$pdf" == *"报价单"* && "$pdf" == *"含税总价"* && "$pdf" == *"1,280.50"* && "$pdf" == *"空运"* ]] ||

@@ -1,0 +1,227 @@
+#!/usr/bin/env python3
+"""Read a whole .xlsx in one command: a map of the blocks of every sheet, and every sheet exported as text.
+
+  sheetmap FILE.xlsx [-o DIR]          write the export to DIR (default: FILE's name + .sheets, here) and print the map
+  sheetmap FILE.xlsx --sheet N|NAME    print the blocks of one sheet in full (nothing is written)
+
+Standard library only. Nothing in the workbook is executed or fetched; macros and external links are reported.
+The export: sNN.tsv for sheet NN, UTF-8, TAB-separated, no header, no quoting: line k is row k of the sheet and the
+k-th field of a line is column k (A first), so a cell reference is a line and field number. A tab, a line break
+or a backslash inside a cell is written \\t, \\n (\\r) or \\\\. Numbers are written as stored (0.15, not 15%),
+dates as 2026-11-19 or 2026-11-19 13:05:00, TRUE/FALSE, errors as #N/A; a formula cell holds its cached value
+(sNN.formulas.tsv lists ref, formula, cached value). A merged range keeps its value in its top-left cell and the
+other cells stay empty (merges.tsv lists the ranges). index.tsv lists the sheets and blocks.tsv the blocks.
+"""
+
+import os
+import sys
+import zipfile
+import xml.etree.ElementTree as ET
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import sheetlib as L  # noqa: E402
+
+MAX_OUT = 11000
+SHEET_LINES = 60
+BLOCKS_PER_SHEET = 6
+USAGE = "usage: sheetmap FILE.xlsx [-o DIR] [--sheet N|NAME]"
+
+
+def block_line(sheet, i, b):
+    parts = [f"{sheet.index}.{i}", b.range, f"{b.rows}x{b.cols}", f"{b.cells} cells"]
+    if b.cells:
+        pct = b.pct_numeric()
+        parts.append("numbers" if pct >= 70 else "text" if pct <= 30 else "mixed")
+        parts[-1] += f" {pct}%"
+    if b.counts.get("x"):
+        parts.append(f"{b.counts['x']} numeric-looking text")
+    line = "  " + "  ".join(parts)
+    if b.titles:
+        line += f'  title "{L.clip(sheet.cells[b.titles[0]][min(sheet.cells[b.titles[0]])], 30)}"'
+    if b.header:
+        tag = f" ({b.header_note})" if b.header_note else ""
+        line += f"  header {L.header_text(sheet, b)}{tag}"
+    elif b.header_note:
+        line += f"  header: {b.header_note}"
+    if b.sparse_cols:
+        c, n = b.sparse_cols[0]
+        line += f"  column {L.col_name(c)} holds {n} of {b.rows} rows: two tables joined?"
+    if b.merges:
+        shown = " ".join(L.rng(*m) for m in b.merges[:3])
+        line += f"  merged {shown}" + (f" +{len(b.merges) - 3}" if len(b.merges) > 3 else "")
+    return line
+
+
+def block_lines(sheet, bl, limit):
+    """The lines of a sheet's blocks: blocks of one or two cells (a title, a link) share one line."""
+    tiny = [(i, b) for i, b in enumerate(bl, 1) if b.cells <= 2]
+    big = [(i, b) for i, b in enumerate(bl, 1) if b.cells > 2]
+    lines = [block_line(sheet, i, b) for i, b in big[:limit]]
+    if len(big) > limit:
+        lines.append(f"  … {len(big) - limit} more blocks of sheet {sheet.index}: sheetmap FILE --sheet {sheet.index}")
+    if tiny:
+        lines.append(f"  {sheet.index}: {len(tiny)} blocks of 1-2 cells: " + " ".join(b.range for _, b in tiny[:12]) + (" …" if len(tiny) > 12 else ""))
+    return lines
+
+
+def write_export(wb, blocks_of, out):
+    os.makedirs(out, exist_ok=True)
+    for name in os.listdir(out):
+        if name in ("index.tsv", "blocks.tsv", "merges.tsv") or (name.startswith("s") and name.endswith(".tsv") and name[1:3].isdigit()):
+            os.remove(os.path.join(out, name))
+    files = {}
+    for sh in wb.sheets:
+        if not sh.cells:
+            continue
+        fname = f"s{sh.index:02d}.tsv"
+        files[sh.index] = fname
+        with open(os.path.join(out, fname), "w", encoding="utf-8", newline="") as f:
+            for _, cells in sh.lines():
+                f.write("\t".join(L.escape_cell(c) for c in cells) + "\n")
+        if sh.formulas:
+            with open(os.path.join(out, f"s{sh.index:02d}.formulas.tsv"), "w", encoding="utf-8", newline="") as f:
+                for ref, formula, cached in sh.formulas[:100000]:
+                    f.write("\t".join(L.escape_cell(x) for x in (ref, formula, cached)) + "\n")
+    with open(os.path.join(out, "index.tsv"), "w", encoding="utf-8", newline="") as f:
+        f.write("sheet\tname\tstate\tused_range\trows\tcols\tcells\tblocks\tformulas\tmerged_ranges\tnumeric_looking_text\tfile\n")
+        for sh in wb.sheets:
+            u = sh.used()
+            rangetext = L.rng(*u) if u else ""
+            rows, cols = (u[2] - u[0] + 1, u[3] - u[1] + 1) if u else (0, 0)
+            f.write("\t".join(str(x) for x in (
+                sh.index, L.escape_cell(sh.name), sh.state, rangetext, rows, cols, sh.ncells, len(blocks_of[sh.index]),
+                len(sh.formulas), len(sh.merges), sh.kind_counts().get("x", 0), files.get(sh.index, ""))) + "\n")
+    with open(os.path.join(out, "blocks.tsv"), "w", encoding="utf-8", newline="") as f:
+        f.write("block\tsheet\trange\trows\tcols\tcells\tnumeric_pct\ttitle_rows\theader_rows\theader_note\n")
+        for sh in wb.sheets:
+            for i, b in enumerate(blocks_of[sh.index], 1):
+                f.write("\t".join(str(x) for x in (
+                    f"{sh.index}.{i}", sh.index, b.range, b.rows, b.cols, b.cells, b.pct_numeric(),
+                    ",".join(map(str, b.titles)), ",".join(map(str, b.header)), b.header_note)) + "\n")
+    with open(os.path.join(out, "merges.tsv"), "w", encoding="utf-8", newline="") as f:
+        f.write("sheet\trange\n")
+        for sh in wb.sheets:
+            for m in sh.merges:
+                f.write(f"{sh.index}\t{L.rng(*m)}\n")
+    return files
+
+
+def render(path, wb, blocks_of, out, files):
+    lines = []
+    flags = []
+    hidden = sum(1 for s in wb.sheets if s.state != "visible")
+    total_blocks = sum(len(v) for v in blocks_of.values())
+    lines.append(f"{os.path.basename(path)}: {len(wb.sheets)} sheets" + (f" ({hidden} hidden)" if hidden else "") + f", {total_blocks} blocks")
+    if out:
+        lines.append(f"export: {out}/  sNN.tsv per sheet (line = row, tab field = column, \\t \\n \\\\ escaped), index.tsv, blocks.tsv, merges.tsv")
+    if wb.macros:
+        flags.append("macros (vbaProject.bin) present: ignored, never run")
+    if wb.external_links:
+        flags.append(f"{wb.external_links} external link part(s): ignored, never followed")
+    for s in wb.sheets:
+        if s.truncated:
+            flags.append(f"sheet {s.index}: stopped after {L.MAX_CELLS} cells")
+        if s.error:
+            flags.append(f"sheet {s.index}: {s.error}")
+    lines.extend("! " + f for f in flags)
+    shown = wb.sheets[:SHEET_LINES]
+    for sh in shown:
+        u = sh.used()
+        bl = len(blocks_of[sh.index])
+        state = "" if sh.state == "visible" else f"  [{sh.state}]"
+        if not u:
+            lines.append(f"{sh.index}. {sh.name}  empty{state}")
+            continue
+        extra = f"  {len(sh.formulas)} formulas" if sh.formulas else ""
+        lines.append(f"{sh.index}. {sh.name}  {L.rng(*u)}  {sh.ncells} cells  {bl} block{'s' if bl != 1 else ''}{extra}{state}  {files.get(sh.index, '')}")
+    if len(wb.sheets) > len(shown):
+        lines.append(f"… {len(wb.sheets) - len(shown)} more sheets: see index.tsv")
+    lines.append("blocks (sheet.block range rows x cols; header = first rows without numbers):")
+    seen = {}
+    for sh in shown:
+        bl = blocks_of[sh.index]
+        sig = tuple((b.range, L.header_text(sh, b)) for b in bl)
+        if bl and sig in seen:
+            lines.append(f"  {sh.index}: the same blocks and headers as sheet {seen[sig]}")
+            continue
+        seen.setdefault(sig, sh.index)
+        lines.extend(block_lines(sh, bl, BLOCKS_PER_SHEET))
+    return fit(lines)
+
+
+def fit(lines):
+    text = "\n".join(lines)
+    if len(text.encode("utf-8")) <= MAX_OUT:
+        return text
+    keep, size = [], 0
+    for line in lines:
+        size += len(line.encode("utf-8")) + 1
+        if size > MAX_OUT - 200:
+            break
+        keep.append(line)
+    keep.append(f"… output cut at {MAX_OUT} bytes: the rest is in blocks.tsv and index.tsv, or sheetmap FILE --sheet N")
+    return "\n".join(keep)
+
+
+def one_sheet(wb, blocks_of, want):
+    pick = None
+    for sh in wb.sheets:
+        if str(sh.index) == want or sh.name == want:
+            pick = sh
+    if pick is None:
+        return None
+    bl = blocks_of[pick.index]
+    lines = [f"{pick.index}. {pick.name}  {len(bl)} blocks"]
+    lines.extend(block_lines(pick, bl, 150))
+    return fit(lines)
+
+
+def main(argv):
+    args = argv[1:]
+    if args in (["-h"], ["--help"]):
+        print(USAGE)
+        return 0
+    out, sheet, path = None, None, None
+    i = 0
+    while i < len(args):
+        if args[i] in ("-o", "--out") and i + 1 < len(args):
+            out = args[i + 1]
+            i += 2
+        elif args[i] == "--sheet" and i + 1 < len(args):
+            sheet = args[i + 1]
+            i += 2
+        elif path is None and not args[i].startswith("-"):
+            path = args[i]
+            i += 1
+        else:
+            print(USAGE, file=sys.stderr)
+            return 2
+    if path is None:
+        print(USAGE, file=sys.stderr)
+        return 2
+    try:
+        wb = L.open_workbook(path)
+    except (zipfile.BadZipFile, OSError, ET.ParseError, KeyError, ValueError) as err:
+        print(f"sheetmap: {path}: {err}", file=sys.stderr)
+        return 1
+    blocks_of = {sh.index: L.find_blocks(sh) for sh in wb.sheets}
+    if sheet is not None:
+        text = one_sheet(wb, blocks_of, sheet)
+        if text is None:
+            print(f"sheetmap: no sheet {sheet!r}", file=sys.stderr)
+            return 1
+        print(text)
+        return 0
+    if out is None:
+        out = os.path.splitext(os.path.basename(path))[0] + ".sheets"
+    try:
+        files = write_export(wb, blocks_of, out)
+    except OSError as err:
+        print(f"sheetmap: {out}: {err}", file=sys.stderr)
+        return 1
+    print(render(path, wb, blocks_of, out, files))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

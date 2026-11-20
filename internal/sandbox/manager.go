@@ -27,7 +27,7 @@ type Language struct {
 // isolation and limits as any other run.
 func OfficeLanguage(image string) Language {
 	return Language{Image: image, File: "main.sh", Command: func(f string) []string { return []string{"sh", f} },
-		Description: "a POSIX shell script with the officecli command on PATH, for reading, editing and creating .docx, .xlsx and .pptx files in the workspace (officecli help lists the commands). sheetskel FILE.xlsx prints each sheet's name, used range and header row; use it instead of unpacking the workbook. pdftext FILE.pdf prints a PDF's pages as text, and md2pdf IN.md OUT.pdf writes a PDF from Markdown, Chinese included"}
+		Description: "a POSIX shell script with the officecli command on PATH, for reading, editing and creating .docx, .xlsx and .pptx files in the workspace (officecli help lists the commands). sheetmap FILE.xlsx maps each sheet's blocks and exports it as text, sheetcheck OUT.xlsx checks a result; use them, not unpacking. pdftext FILE.pdf prints a PDF's pages as text, and md2pdf IN.md OUT.pdf writes a PDF from Markdown, Chinese included"}
 }
 
 // Config of the manager.

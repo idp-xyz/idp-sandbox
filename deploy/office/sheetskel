@@ -154,7 +154,7 @@ def skeleton(path):
             lines.append(f"{i}. {name}  (unreadable)")
             continue
         data = next((node for node in root if local(node.tag) == "sheetData"), None)
-        rows = [row for row in (data or []) if local(row.tag) == "row"]
+        rows = [row for row in (data if data is not None else []) if local(row.tag) == "row"]
         ref, nrows, ncols = sheet_size(root, len(rows))
         if ncols == 0 and rows:
             ncols = max((len(row_cells(row, strings)) for row in rows[:2]), default=0)

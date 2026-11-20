@@ -8,7 +8,7 @@
 - **只能放在 idp-mcp 网关后面**：服务器自己没有认证，只有网关能到达它的私网才安全。网关负责认证、授权、参数校验和审计，并把调用者转发给它。
 - 在 idp-mcp 里必须以 `identity: forward` 注册（`POST /api/v1/servers`，`"identity":"forward"`，注册后不可改）；否则每个请求都被拒绝（`the request carries no caller identity`）。
 - 工具：`sandbox_create`、`sandbox_run`（`python` / `shell`）、`sandbox_write_file`、`sandbox_read_file`、`sandbox_list_files`、`sandbox_delete`。经网关时带目标名前缀（`sandbox__sandbox_run`）。
-- 工具的 schema 变了（例如启用出口、改限额，或升级到 `language` 的说明有变化的版本：ADR-0001 D16、D17 在 `office` 的说明里加了 `sheetskel`、`pdftext`、`md2pdf`）→ 网关钉住的目录会漂移，要对服务器重新 `discover`、评审、重新发布 Release。只换 office 运行镜像不改 schema，不需要这一步。
+- 工具的 schema 变了（例如启用出口、改限额，或升级到 `language` 的说明有变化的版本：ADR-0001 D16、D17 在 `office` 的说明里加了 `sheetskel`、`pdftext`、`md2pdf`；D23 把说明里的 `sheetskel` 换成 `sheetmap`、`sheetcheck`：升级到这一版的服务，要对沙箱服务器重新 `discover`、评审、重新发布 Release，运行中的网关才会带上新说明）→ 网关钉住的目录会漂移，要对服务器重新 `discover`、评审、重新发布 Release。只换 office 运行镜像不改 schema，不需要这一步。
 - 启用出口还会把 `sandbox_run` 的注解 `openWorldHint` 从 `false` 改成 `true`（平台 ADR-0003 D7：能连外面就如实说能连外面）。注解也在钉住的目录里：idp-mcp 的 `federation.NormalizeTools` 保留工具的每个字段（含 `annotations`），Release 的快照摘要和网关的漂移检查（`CheckDrift`，默认每分钟一次）都用同一份规范化后的目录算摘要，`TestDigestChangesWhenMeaningChanges` 就覆盖了注解变化会改摘要。所以只改注解与改 schema 一样：网关会报 `DRIFTED`，`driftAction` 为默认的 `block` 时对该服务器的所有调用被拒绝。运维要做的：先对服务器 `POST /api/v1/servers/{id}/discover` 重新发现，评审新旧快照的差别（这里应当只有 `network` 枚举与 `openWorldHint`），再发布新的 Release；在 Release 生效前这个服务器处于封锁状态，服务一滚动、Release 还没换，两边就不一致，所以启用出口要和重新发现、发布 Release 排在同一个窗口里（`driftAction: report` 的网关只报告不封锁）。反过来关闭出口也一样。
 
 ## 2. 两种后端
@@ -126,7 +126,7 @@ Kubernetes：`kubectl apply -k deploy/kubernetes`（先把镜像摘要、API 服
 | 运行总是 `timed out` | 代码慢，或在 gVisor 下系统调用密集 | 调大 `_TIMEOUT_S`（上限）；评估运行时的开销 |
 | 运行是 `killed: out of memory` | 内存上限 | 调大 `_MEMORY_MB`；Kata 下写满 `/tmp` 也表现为 OOM |
 | `docker: HTTP 404: No such image` | 运行镜像不在 Docker 守护进程 / 节点上 | 运维拉取或加载（服务绝不拉镜像）|
-| 运行里 `md2pdf: not found`、`pdftext: not found`、`officecli: not found` | 这次运行用的是 `language: shell` 或 `python`；这些命令只在 office 镜像里 | 用 `language: office`（Agent 的 skill 里要写明每次运行都用它）|
+| 运行里 `md2pdf: not found`、`pdftext: not found`、`sheetmap: not found`、`sheetcheck: not found`、`officecli: not found` | 这次运行用的是 `language: shell` 或 `python`；这些命令只在 office 镜像里 | 用 `language: office`（Agent 的 skill 里要写明每次运行都用它）|
 | 构建 office 镜像时 `is not the pinned …: its SHA-256 differs` | 上游换了这个地址上的文件，或缓存目录里的文件坏了 | 核对上游的校验和后再改脚本里的钉；不要跳过校验 |
 | Pod 一直 `ContainerCreating`（Kubernetes）| 运行时问题 | gVisor：用 `kvm` 或 `ptrace` 平台，节点 inotify 上限调到 8192；Kata：Go 运行时 + Cloud Hypervisor，别给 RuntimeClass 加 overhead |
 | gVisor 下内存炸弹只被超时停下，运行的内存 / CPU 上限不生效（Kubernetes）| 节点用 systemd cgroup 驱动而 runsc 没开 `systemd-cgroup`：沙箱跑在 Pod 的 cgroup 之外；节点有 swap 时还有一层：kubelet 只给容器关 swap，而整个沙箱在 pause 容器的 cgroup 里 | `runsc.toml` 的 `[runsc_config]` 加 `systemd-cgroup = "true"`；节点有 swap 就给 Pod 关掉（`kubelet-kubepods.slice` 的 `MemorySwapMax=0`）；kind 上 `tests/kind/gvisor.sh` 都做了 |

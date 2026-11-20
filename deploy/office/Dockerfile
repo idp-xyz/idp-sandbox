@@ -4,6 +4,8 @@ ARG BASE=python:3.12-slim
 FROM ${BASE}
 COPY officecli /usr/local/bin/officecli
 COPY sheetskel /usr/local/bin/sheetskel
+# one command that reads a whole workbook (sheetmap), one that reports on a produced one (sheetcheck), and the reader they share
+COPY sheetmap sheetcheck sheetlib.py /usr/local/bin/
 # PDF and Markdown (ADR-0001 D17): pypdf reads a PDF (pycryptodome opens an encrypted one), reportlab writes one (it
 # needs Pillow and charset-normalizer), and Noto Sans SC is the font a written PDF embeds for Chinese. The wheels are
 # installed without an index and without resolving anything; pip check fails the build when a requirement is missing.

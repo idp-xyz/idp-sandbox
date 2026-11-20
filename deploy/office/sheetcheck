@@ -1,0 +1,413 @@
+#!/usr/bin/env python3
+"""Report on a produced .xlsx in one call; given the source workbook (or sheetmap's export directory), reconcile the two.
+
+  sheetcheck OUT.xlsx [--source SRC.xlsx|DIR] [--no-validate]
+
+It reports and does not decide: exit 0 with the findings listed, 1 when OUT.xlsx cannot be read, 2 for a wrong command line.
+Every section says what it checked and what it did not. Standard library only; nothing in either workbook is executed or fetched.
+"""
+
+import os
+import shutil
+import subprocess
+import sys
+import zipfile
+import xml.etree.ElementTree as ET
+from collections import Counter
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import sheetlib as L  # noqa: E402
+
+MAX_OUT = 9500
+USAGE = "usage: sheetcheck OUT.xlsx [--source SRC.xlsx|DIR] [--no-validate]"
+findings = []
+
+
+def finding(text):
+    findings.append(text)
+    return "  ! " + text
+
+
+def section(title, checked, not_checked):
+    return [f"== {title}", f"   checked: {checked}", f"   not checked: {not_checked}"]
+
+
+def num_key(text):
+    try:
+        v = float(text.replace(",", "").rstrip("%"))
+    except ValueError:
+        return None
+    return format(v, ".10g")
+
+
+def load_export(directory):
+    """A Workbook built from sheetmap's export: types are guessed from the text (a number stored as text reads as a number)."""
+    wb = L.Workbook(directory)
+    with open(os.path.join(directory, "index.tsv"), encoding="utf-8") as f:
+        rows = [line.rstrip("\n").split("\t") for line in f][1:]
+    merges = {}
+    try:
+        with open(os.path.join(directory, "merges.tsv"), encoding="utf-8") as f:
+            for line in list(f)[1:]:
+                idx, _, ref = line.rstrip("\n").partition("\t")
+                box = L.parse_range(ref)
+                if box:
+                    merges.setdefault(int(idx), []).append(box)
+    except OSError:
+        pass
+    for row in rows:
+        sh = L.Sheet(int(row[0]), L.unescape_cell(row[1]), row[2], "")
+        sh.merges = merges.get(sh.index, [])
+        if len(row) > 11 and row[11]:
+            with open(os.path.join(directory, row[11]), encoding="utf-8") as f:
+                for r, line in enumerate(f, 1):
+                    for c, cell in enumerate(line.rstrip("\n").split("\t"), 1):
+                        if cell == "":
+                            continue
+                        text = L.unescape_cell(cell)
+                        sh.cells.setdefault(r, {})[c] = text
+                        sh.kinds.setdefault(r, {})[c] = "n" if L.NUMLIKE.match(text.strip()) else "t"
+                        sh.ncells += 1
+        wb.sheets.append(sh)
+    return wb
+
+
+def overlaps(merges):
+    ordered = sorted(merges)[:20000]
+    out = []
+    for i, a in enumerate(ordered):
+        for b in ordered[i + 1:]:
+            if b[0] > a[2]:
+                break
+            if b[1] <= a[3] and a[1] <= b[3]:
+                out.append((a, b))
+    return out
+
+
+def read_section(wb, blocks_of):
+    lines = section("READ", "the cells of every sheet (values only)", "styles, number formats, column widths, charts, formulas' meaning, how it looks")
+    for sh in wb.sheets:
+        u = sh.used()
+        state = "" if sh.state == "visible" else f" [{sh.state}]"
+        if sh.error:
+            lines.append(finding(f"sheet {sh.index} {sh.name!r}: {sh.error}"))
+            continue
+        if not u:
+            lines.append(f"  {sh.index}. {sh.name}{state}  empty")
+            lines.append(finding(f"sheet {sh.index} {sh.name!r} has no cell values"))
+            continue
+        extra = ""
+        if sh.formulas:
+            nocache = sum(1 for _, _, v in sh.formulas if v == "")
+            extra = f"  {len(sh.formulas)} formulas" + (f" ({nocache} without a cached value)" if nocache else "")
+        lines.append(f"  {sh.index}. {sh.name}{state}  {L.rng(*u)}  {u[2] - u[0] + 1} rows x {u[3] - u[1] + 1} cols  {sh.ncells} cells  "
+                     f"{len(blocks_of[sh.index])} block(s)  {len(sh.merges)} merged{extra}")
+        if sh.truncated:
+            lines.append(finding(f"sheet {sh.index}: only the first {L.MAX_CELLS} cells were read"))
+    if wb.macros:
+        lines.append(finding("the file carries a macro project (vbaProject.bin)"))
+    if wb.external_links:
+        lines.append(finding(f"the file has {wb.external_links} external link part(s)"))
+    return lines
+
+
+def holes_section(wb, blocks_of):
+    lines = section("EMPTY CELLS INSIDE BLOCKS", "per block (cells between empty rows/columns), the empty cells inside its rectangle; a block split by one empty row or column",
+                    "whether an empty cell is meant to be empty")
+    rows = []
+    for sh in wb.sheets:
+        bl = blocks_of[sh.index]
+        for i, b in enumerate(bl, 1):
+            if b.holes() > 0 and b.cells >= 4:
+                per = Counter()
+                for r in range(b.r1, b.r2 + 1):
+                    row = sh.cells.get(r, {})
+                    for c in range(b.c1, b.c2 + 1):
+                        if c not in row:
+                            per[c] += 1
+                rows.append((b.holes(), sh, i, b, per))
+        pairs = []
+        for a, b in zip(bl, bl[1:]):
+            if min(a.cells, b.cells) < 4:
+                continue
+            if a.c1 == b.c1 and a.c2 == b.c2 and b.r1 - a.r2 == 2:
+                pairs.append((a, b, "row"))
+            elif a.r1 == b.r1 and a.r2 == b.r2 and b.c1 - a.c2 == 2:
+                pairs.append((a, b, "column"))
+        if pairs:
+            a, b, what = pairs[0]
+            lines.append(finding(f"sheet {sh.index}: {len(pairs)} pair(s) of neighbouring blocks with the same extent and one empty {what} between, e.g. {a.range} and {b.range} (one table split by a blank {what}?)"))
+    if not rows:
+        lines.append("  no block has empty cells inside it (blocks of fewer than 4 cells not looked at)")
+    rows.sort(key=lambda t: -t[0])
+    for n, sh, i, b, per in rows[:5]:
+        cols = ", ".join(f"{L.col_name(c)} {k}" for c, k in per.most_common(5) if k)
+        lines.append(finding(f"sheet {sh.index} {b.range}: {n} empty of {b.rows * b.cols} cells (columns {cols})"))
+    if len(rows) > 5:
+        lines.append(f"  … {len(rows) - 5} more blocks with empty cells")
+    return lines
+
+
+def merges_section(wb):
+    lines = section("MERGED RANGES", "overlaps between merged ranges, values hidden under a merge (not in its top-left cell), one-cell merges, merges over 500 cells",
+                    "whether a merge is wanted; merges the file declares outside <mergeCells> (none expected)")
+    total = bad = 0
+    for sh in wb.sheets:
+        total += len(sh.merges)
+        before = len(findings)
+        for a, b in overlaps(sh.merges)[:5]:
+            lines.append(finding(f"sheet {sh.index}: merged ranges {L.rng(*a)} and {L.rng(*b)} overlap (Excel reports the file as damaged)"))
+        hidden = []
+        for m in sh.merges[:20000]:
+            if (m[2] - m[0] + 1) * (m[3] - m[1] + 1) > 500:
+                lines.append(finding(f"sheet {sh.index}: merged range {L.rng(*m)} covers {(m[2] - m[0] + 1) * (m[3] - m[1] + 1)} cells"))
+                continue
+            if m[:2] == m[2:]:
+                lines.append(finding(f"sheet {sh.index}: {L.rng(*m)} is a merge of one cell"))
+                continue
+            for r in range(m[0], m[2] + 1):
+                row = sh.cells.get(r)
+                if row:
+                    hidden.extend(L.a1(r, c) for c in range(m[1], m[3] + 1) if c in row and (r, c) != (m[0], m[1]))
+        if hidden:
+            lines.append(finding(f"sheet {sh.index}: {len(hidden)} cell(s) under a merge hold a value that is not shown, e.g. {', '.join(hidden[:4])}"))
+        bad += len(findings) - before
+    if total == 0:
+        lines.append("  no merged ranges")
+    elif bad == 0:
+        lines.append(f"  {total} merged range(s), none of the problems above")
+    return lines
+
+
+def text_numbers_section(wb):
+    lines = section("NUMBERS STORED AS TEXT", "cells that hold text which reads as a number (1,234.5  12%  007)", "whether text is right: codes and postal codes with leading zeros are often meant as text")
+    any_found = False
+    for sh in wb.sheets:
+        xs = [(r, c) for r, row in sh.kinds.items() for c, k in row.items() if k == "x"]
+        if not xs:
+            continue
+        any_found = True
+        xs.sort()
+        lead = [rc for rc in xs if (v := sh.cells[rc[0]][rc[1]].strip()).startswith("0") and len(v) > 1 and v[1] != "."]
+        eg = ", ".join(f"{L.a1(*rc)}={L.clip(sh.cells[rc[0]][rc[1]], 12)!r}" for rc in xs[:4])
+        lines.append(finding(f"sheet {sh.index}: {len(xs)} text cell(s) read as numbers ({len(lead)} with a leading zero), e.g. {eg}"))
+    if not any_found:
+        lines.append("  none")
+    return lines
+
+
+def headers_section(wb, blocks_of):
+    lines = section("HEADERS AND COLUMNS", "per block of 3 or more rows and 2 or more columns: a first row (or rows) without numbers above data; empty or repeated header cells; columns mixing numbers and text",
+                    "whether the header names are the right ones; this is a guess from the cell types")
+    shown = 0
+    for sh in wb.sheets:
+        for i, b in enumerate(blocks_of[sh.index], 1):
+            if b.rows < 3 or b.cols < 2 or b.cells < 6:
+                continue
+            if not b.header or b.header_note.startswith("guess: no numbers"):
+                if b.numeric():
+                    shown += 1
+                    if shown <= 8:
+                        lines.append(finding(f"sheet {sh.index} {b.range}: no header row (a row of text above the data) found"))
+                continue
+            hr = b.header[-1]
+            row = sh.cells.get(hr, {})
+            names = [row.get(c, "") for c in range(b.c1, b.c2 + 1)]
+            data_cols = {c for r in range(hr + 1, b.r2 + 1) for c in sh.cells.get(r, {}) if b.c1 <= c <= b.c2}
+            blank = [L.col_name(c) for c in sorted(data_cols) if c not in row]
+            dup = [n for n, k in Counter(n for n in names if n).items() if k > 1]
+            mixed = []
+            for c in sorted(data_cols):
+                kinds = Counter(sh.kinds.get(r, {}).get(c) for r in range(hr + 1, b.r2 + 1))
+                if kinds.get("n") and (kinds.get("t") or kinds.get("x")):
+                    mixed.append(L.col_name(c))
+            notes = []
+            if blank:
+                notes.append("data under an empty header cell in " + ", ".join(blank[:6]))
+            if dup:
+                notes.append("repeated header " + ", ".join(repr(L.clip(d, 12)) for d in dup[:3]))
+            if mixed:
+                notes.append("numbers and text mixed in column " + ", ".join(mixed[:6]))
+            if notes:
+                shown += 1
+                if shown <= 8:
+                    lines.append(finding(f"sheet {sh.index} {b.range} (header row {hr}): " + "; ".join(notes)))
+    if shown > 8:
+        lines.append(f"  … {shown - 8} more blocks with such findings")
+    if shown == 0:
+        lines.append("  every block with data has a header row and none of the problems above")
+    return lines
+
+
+def validate_section(path, run):
+    lines = section("VALIDATE (officecli validate)", "the file against the OpenXML schema, by officecli itself", "everything that is schema-valid but wrong: values, layout, the meaning of the sheets")
+    exe = shutil.which("officecli") if run else None
+    if not run:
+        lines.append(finding("validate NOT RUN (--no-validate)"))
+        return lines
+    if not exe:
+        lines.append(finding("validate NOT RUN: officecli is not on PATH; run officecli validate FILE yourself"))
+        return lines
+    try:
+        p = subprocess.run([exe, "validate", path], capture_output=True, text=True, timeout=90)
+    except (subprocess.TimeoutExpired, OSError) as err:
+        lines.append(finding(f"validate NOT COMPLETED: {err}"))
+        return lines
+    out = (p.stdout + p.stderr).strip().splitlines()
+    shown = [L.clip(x, 160) for x in out[:10]]
+    lines.append(f"  exit {p.returncode}:")
+    lines.extend("    " + x for x in shown)
+    if len(out) > 10:
+        lines.append(f"    … {len(out) - 10} more lines")
+    if p.returncode != 0:
+        lines.append(finding(f"officecli validate exited {p.returncode}"))
+    return lines
+
+
+def collect(wb, blocks_of):
+    nums, texts, blocks = Counter(), Counter(), []
+    xnums = Counter()
+    for sh in wb.sheets:
+        for r, row in sh.kinds.items():
+            for c, k in row.items():
+                v = sh.cells[r][c]
+                if k == "n":
+                    nums[num_key(v)] += 1
+                elif k == "x":
+                    xnums[num_key(v)] += 1
+                    texts[" ".join(v.split())] += 1
+                elif k in ("t", "d"):
+                    texts[" ".join(v.split())] += 1
+        for i, b in enumerate(blocks_of[sh.index], 1):
+            vals = Counter()
+            for r in range(b.r1, b.r2 + 1):
+                for c, k in sh.kinds.get(r, {}).items():
+                    if b.c1 <= c <= b.c2 and k == "n":
+                        vals[num_key(sh.cells[r][c])] += 1
+            blocks.append((sh, i, b, vals))
+    return nums, xnums, texts, blocks
+
+
+def reconcile_section(wb, blocks_of, src, src_blocks, exact):
+    lines = section("RECONCILIATION with the source",
+                    "numeric cells and distinct numbers, and text cells, of the source against the output, by value only, wherever they are in the output; each source block's numbers against the output; "
+                    "whether some output block is at least half the size of each source block",
+                    "which source cell went where; whether a number was moved to the right row or column; units, rounding below 10 digits, formulas; a number that appears elsewhere in the output by coincidence counts as found")
+    if not exact:
+        lines.append("  note: the source is an export directory: its types are guessed, a number stored as text counts as a number, dates as text")
+    sn, sx, st, sblocks = collect(src, src_blocks)
+    on, ox, ot, oblocks = collect(wb, blocks_of)
+    S, O = sum(sn.values()), sum(on.values())
+    found = [k for k in sn if k in on]
+    as_text = [k for k in sn if k not in on and k in ox]
+    missing = sorted((k for k in sn if k not in on and k not in ox), key=lambda k: (-sn[k], k))
+    cover = sum(min(n, on.get(k, 0)) for k, n in sn.items())
+    lines.append(f"  numeric cells: source {S}, output {O}; distinct numbers: source {len(sn)}, of which in the output {len(found)} as numbers, {len(as_text)} only as text, {len(missing)} absent")
+    lines.append(f"  source numeric cells whose value occurs in the output at least as often: {cover} of {S}" + (f" ({100 * cover // S}%)" if S else ""))
+    if missing:
+        lines.append(finding("source numbers absent from the output: " + ", ".join(f"{k} (x{sn[k]})" for k in missing[:8]) + (" …" if len(missing) > 8 else "")))
+    extra = sorted((k for k in on if k not in sn), key=lambda k: (-on[k], k))
+    lines.append(f"  output numbers (distinct {len(on)}) that no source cell has: {len(extra)}" + (" (computed, rounded or typed: this tool cannot tell)" if extra else ""))
+    if extra:
+        lines.append(finding("numbers only in the output: " + ", ".join(f"{k} (x{on[k]})" for k in extra[:8]) + (" …" if len(extra) > 8 else "")))
+    poor = []
+    nosize = []
+    for sh, i, b, vals in sblocks:
+        total = sum(vals.values())
+        if total < 6:
+            continue
+        got = sum(1 for k in vals if k in on or k in ox)
+        if got < len(vals):
+            poor.append((got / len(vals), sh, i, b, got, len(vals)))
+        if not any(ob.cells * 2 >= b.cells for _, _, ob, _ in oblocks):
+            nosize.append((sh, i, b))
+    poor.sort(key=lambda t: t[0])
+    for _, sh, i, b, got, n in poor[:6]:
+        lines.append(finding(f"source sheet {sh.index} {b.range} ({b.cells} cells): {got} of its {n} distinct numbers are in the output"))
+    if len(poor) > 6:
+        lines.append(f"  … {len(poor) - 6} more source blocks with numbers missing from the output")
+    for sh, i, b in nosize[:6]:
+        lines.append(finding(f"source sheet {sh.index} {b.range} ({b.cells} cells) has no output block at least half its size (it may have been spread over several blocks)"))
+    if len(nosize) > 6:
+        lines.append(f"  … {len(nosize) - 6} more source blocks without a block of a size to hold them")
+    if not poor and not nosize:
+        lines.append("  every source block with 6 or more numbers has all its distinct numbers in the output and an output block of at least half its size")
+    tmiss = sorted((k for k in st if k not in ot), key=lambda k: (-st[k], k))
+    lines.append(f"  text cells: distinct strings in the source {len(st)}, in the output as a cell {len(st) - len(tmiss)}, absent {len(tmiss)} (notes and headings may rightly be dropped)")
+    if tmiss:
+        lines.append(finding("source texts absent from the output: " + ", ".join(repr(L.clip(k, 20)) for k in tmiss[:6]) + (" …" if len(tmiss) > 6 else "")))
+    return lines
+
+
+def fit(lines):
+    text = "\n".join(lines)
+    if len(text.encode("utf-8")) <= MAX_OUT:
+        return text
+    keep, size = [], 0
+    for line in lines:
+        size += len(line.encode("utf-8")) + 1
+        if size > MAX_OUT - 300:
+            break
+        keep.append(line)
+    keep.append(f"… output cut at {MAX_OUT} bytes; the findings count below is complete")
+    return "\n".join(keep + lines[-3:])
+
+
+def main(argv):
+    args = argv[1:]
+    if args in (["-h"], ["--help"]):
+        print(USAGE)
+        return 0
+    path = source = None
+    validate = True
+    i = 0
+    while i < len(args):
+        if args[i] == "--source" and i + 1 < len(args):
+            source = args[i + 1]
+            i += 2
+        elif args[i] == "--no-validate":
+            validate = False
+            i += 1
+        elif path is None and not args[i].startswith("-"):
+            path = args[i]
+            i += 1
+        else:
+            print(USAGE, file=sys.stderr)
+            return 2
+    if path is None:
+        print(USAGE, file=sys.stderr)
+        return 2
+    try:
+        wb = L.open_workbook(path)
+    except (zipfile.BadZipFile, OSError, ET.ParseError, KeyError, ValueError) as err:
+        print(f"sheetcheck: {path}: {err}", file=sys.stderr)
+        return 1
+    src = None
+    if source:
+        try:
+            src = load_export(source) if os.path.isdir(source) else L.open_workbook(source)
+        except (zipfile.BadZipFile, OSError, ET.ParseError, KeyError, ValueError, IndexError) as err:
+            print(f"sheetcheck: source {source}: {err}", file=sys.stderr)
+            return 1
+    blocks_of = {sh.index: L.find_blocks(sh) for sh in wb.sheets}
+    size = os.path.getsize(path)
+    lines = [f"{os.path.basename(path)}: {len(wb.sheets)} sheet(s), {sum(s.ncells for s in wb.sheets)} cells, {size} bytes"]
+    lines += read_section(wb, blocks_of)
+    lines += holes_section(wb, blocks_of)
+    lines += merges_section(wb)
+    lines += text_numbers_section(wb)
+    lines += headers_section(wb, blocks_of)
+    lines += validate_section(path, validate)
+    if src is not None:
+        src_blocks = {sh.index: L.find_blocks(sh, with_header=False) for sh in src.sheets}
+        lines += reconcile_section(wb, blocks_of, src, src_blocks, not os.path.isdir(source))
+    else:
+        lines += section("RECONCILIATION with the source", "nothing", "everything: no --source was given, so nothing says whether the output holds what the source held")
+    lines.append(f"findings: {len(findings)} ('!' lines above). They are observations, not a verdict: this tool does not know what the workbook was meant to contain.")
+    lines.append("not covered by any section: formatting and appearance, formulas' correctness, charts, that the sheets answer the user's request.")
+    print(fit(lines))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
