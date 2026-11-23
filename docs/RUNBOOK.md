@@ -45,6 +45,7 @@
 | `IDP_SANDBOX_RUNTIME_CLASS` | Kubernetes：RuntimeClass | 无 |
 | `IDP_SANDBOX_EGRESS_PROXY` / `_EGRESS_PORT` | 出口代理与端口；设了才有 `network: egress`。Docker 后端是代理的容器名；Kubernetes 后端是代理 Service 的 DNS 名（或 cluster IP），服务每次运行前解析它 | 关 |
 | `IDP_SANDBOX_EGRESS_KEY_FILE` | 与出口代理共用的密钥文件（至少 32 字节，如 `openssl rand -hex 32`）；设了之后每次运行的代理地址里带着说明调用者租户的凭据（ADR-0001 D21） | 不设：所有运行用同一张白名单 |
+| `IDP_EGRESS_DIAL_FAMILY`（出口代理的环境变量，不是服务的） | `prefer-ipv4`（默认）、`dual`、`ipv4-only`、`ipv6-only`：检查过的地址按哪些地址族拨、哪个先拨（ADR-0001 D24）。默认 IPv4 先拨，IPv6 晚 250 ms 才开始；`dual` 是 RFC 8305 原样（解析器的第一个族先拨）；`ipv4-only` / `ipv6-only` 在拨号前丢掉另一个族，没有剩下的地址就按“无地址”报连接错误。不认识的值启动失败，启动时记一行日志 | `prefer-ipv4` |
 | `IDP_SANDBOX_NAMESPACE` / `_STORAGE_CLASS` / `_OWNER` | Kubernetes 后端的命名空间、存储类、清扫标签 | Pod 自己的命名空间 / 集群默认 / `default` |
 
 出口代理（`idp-sandbox-egress`）：`IDP_EGRESS_HOSTS`（精确名或 `*.后缀`，空 = 全部拒绝）、`IDP_EGRESS_PORTS`（默认 443、80）。它自己解析并拒绝回环、私网、链路本地、云元数据，不要开 `IDP_EGRESS_ALLOW_PRIVATE`（仅测试）。白名单里不要放允许上传的主机。

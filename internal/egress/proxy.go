@@ -174,13 +174,15 @@ type Proxy struct {
 	Log         *slog.Logger
 	MaxConns    int           // concurrent tunnels (default 64)
 	DialTimeout time.Duration // default 10 s
+	DialFamily  DialFamily    // which address families are dialed, and which first (IDP_EGRESS_DIAL_FAMILY, ADR-0001 D24); default prefer-ipv4
 	MaxLifetime time.Duration // a tunnel is cut after this long (default 5 min)
 	MaxBytes    int64         // per direction and tunnel (default 64 MiB)
 	Resolver    interface {
 		LookupNetIP(ctx context.Context, network, host string) ([]netip.Addr, error)
 	}
 
-	now    func() time.Time // tests
+	now    func() time.Time                                                     // tests
+	dialFn func(ctx context.Context, network, address string) (net.Conn, error) // tests: replaces the TCP dial after the check
 	active atomic.Int64
 	once   sync.Once
 }
@@ -213,7 +215,7 @@ func (p *Proxy) init() {
 
 var errDenied = errors.New("denied")
 
-// dial resolves host itself and connects to the first acceptable address.
+// dial resolves host itself and connects to one of the acceptable addresses (dialRace: Happy Eyeballs, ADR-0001 D24).
 func (p *Proxy) dial(ctx context.Context, host string, port int) (net.Conn, error) {
 	var addrs []netip.Addr
 	if a, err := netip.ParseAddr(host); err == nil {
@@ -226,18 +228,20 @@ func (p *Proxy) dial(ctx context.Context, host string, port int) (net.Conn, erro
 	}
 	ctx, cancel := context.WithTimeout(ctx, p.DialTimeout)
 	defer cancel()
-	var last error = errDenied
+	var allowed []netip.Addr
 	for _, a := range addrs {
-		if !p.Policy.AllowPrivate && Blocked(a) {
-			continue
+		if p.Policy.AllowPrivate || !Blocked(a) {
+			allowed = append(allowed, a)
 		}
-		c, err := (&net.Dialer{}).DialContext(ctx, "tcp", netip.AddrPortFrom(a.Unmap(), uint16(port)).String())
-		if err == nil {
-			return c, nil
-		}
-		last = err
 	}
-	return nil, last
+	if len(allowed) == 0 {
+		return nil, errDenied
+	}
+	dial := p.dialFn
+	if dial == nil {
+		dial = (&net.Dialer{}).DialContext
+	}
+	return dialRace(ctx, dial, p.DialFamily, allowed, port)
 }
 
 func splitHostPort(hostport, defaultPort string) (string, int, error) {

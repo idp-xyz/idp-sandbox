@@ -8,6 +8,8 @@
 //	IDP_EGRESS_KEY_FILE the key shared with the sandbox service (its IDP_SANDBOX_EGRESS_KEY_FILE; at least 32 bytes, for
 //	                    example openssl rand -hex 32): every request must then carry the credential the service made for the
 //	                    run, which says the run's tenant (ADR-0001 D21). Unset: any run may use the proxy, as one
+//	IDP_EGRESS_DIAL_FAMILY prefer-ipv4 (default), dual, ipv4-only or ipv6-only: which address families the proxy dials and which
+//	                    goes first (ADR-0001 D24). An unknown value is a startup error
 //	IDP_EGRESS_TENANTS_FILE   allow-lists per tenant (YAML: default: {hosts, ports}, tenants: {<tenant id>: {hosts, ports}};
 //	                    internal/egress/tenants.go). A tenant named there gets its own list and nothing of the default;
 //	                    the others get default, or IDP_EGRESS_HOSTS / IDP_EGRESS_PORTS when the file has none. Needs the key
@@ -50,6 +52,12 @@ func main() {
 		listen = "0.0.0.0:3128"
 	}
 	p := &egress.Proxy{Policy: egress.Policy{Hosts: hosts, Ports: ports, AllowPrivate: os.Getenv("IDP_EGRESS_ALLOW_PRIVATE") == "true"}, Log: log}
+	family, err := egress.ParseDialFamily(os.Getenv("IDP_EGRESS_DIAL_FAMILY"))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "IDP_EGRESS_DIAL_FAMILY:", err)
+		os.Exit(2)
+	}
+	p.DialFamily = family
 	if f := os.Getenv("IDP_EGRESS_KEY_FILE"); f != "" {
 		key, err := egress.LoadKey(f)
 		if err != nil {
@@ -79,7 +87,7 @@ func main() {
 		names = append(names, id)
 	}
 	sort.Strings(names)
-	log.Info("idp-sandbox-egress listening", "addr", listen, "hosts", p.Policy.Hosts, "credentialRequired", p.Key != nil, "tenantsWithTheirOwnList", names)
+	log.Info("idp-sandbox-egress listening", "addr", listen, "hosts", p.Policy.Hosts, "dialFamily", string(p.DialFamily), "credentialRequired", p.Key != nil, "tenantsWithTheirOwnList", names)
 	srv := &http.Server{Addr: listen, Handler: p, ReadHeaderTimeout: 10 * time.Second}
 	if err := srv.ListenAndServe(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
