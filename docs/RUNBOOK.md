@@ -9,6 +9,7 @@
 - 在 idp-mcp 里必须以 `identity: forward` 注册（`POST /api/v1/servers`，`"identity":"forward"`，注册后不可改）；否则每个请求都被拒绝（`the request carries no caller identity`）。
 - 工具：`sandbox_create`、`sandbox_run`（`python` / `shell`）、`sandbox_write_file`、`sandbox_read_file`、`sandbox_list_files`、`sandbox_delete`。经网关时带目标名前缀（`sandbox__sandbox_run`）。
 - 工具的 schema 变了（例如启用出口、改限额，或升级到 `language` 的说明有变化的版本：ADR-0001 D16、D17 在 `office` 的说明里加了 `sheetskel`、`pdftext`、`md2pdf`；D23 曾把说明里的 `sheetskel` 换成 `sheetmap`、`sheetcheck`，2026-11-20 又改回 `sheetskel`，与改回的 skill 一致：已经带着那一版说明（提交 da86df8）的部署，要对沙箱服务器再 `discover`、评审、重新发布 Release，网关才会回到 `sheetskel`；没带过那一版的不受影响）→ 网关钉住的目录会漂移，要对服务器重新 `discover`、评审、重新发布 Release。只换 office 运行镜像不改 schema，不需要这一步。
+- **D25（2026-11-25）又改了 `office` 的说明**：多了 `ooxml2md` 与 `pdftext --markdown`。已经在运行的部署，升级沙箱后要按同样的步骤重新 discover、评审、发布；在那之前网关的漂移检查会把 `sandbox_run` 判为漂移。
 - 启用出口还会把 `sandbox_run` 的注解 `openWorldHint` 从 `false` 改成 `true`（平台 ADR-0003 D7：能连外面就如实说能连外面）。注解也在钉住的目录里：idp-mcp 的 `federation.NormalizeTools` 保留工具的每个字段（含 `annotations`），Release 的快照摘要和网关的漂移检查（`CheckDrift`，默认每分钟一次）都用同一份规范化后的目录算摘要，`TestDigestChangesWhenMeaningChanges` 就覆盖了注解变化会改摘要。所以只改注解与改 schema 一样：网关会报 `DRIFTED`，`driftAction` 为默认的 `block` 时对该服务器的所有调用被拒绝。运维要做的：先对服务器 `POST /api/v1/servers/{id}/discover` 重新发现，评审新旧快照的差别（这里应当只有 `network` 枚举与 `openWorldHint`），再发布新的 Release；在 Release 生效前这个服务器处于封锁状态，服务一滚动、Release 还没换，两边就不一致，所以启用出口要和重新发现、发布 Release 排在同一个窗口里（`driftAction: report` 的网关只报告不封锁）。反过来关闭出口也一样。
 
 ## 2. 两种后端
@@ -85,6 +86,8 @@ kubectl apply -k deploy/kubernetes-egress
 - 改 `tenants.yaml` 后重新 `kubectl apply -k`：ConfigMap 换了名字，代理滚动重启，正在进行的连接会断。轮换密钥：更新 Secret 后先 `kubectl -n idp-sandbox rollout restart deploy/idp-sandbox-egress`，再重启 `deploy/idp-sandbox`。
 - 服务启动时多探测一次：与出口运行同标签的 Pod 不应连得上 API 服务器（连得上就不启动，说明有策略把出口运行放得太宽），应当连得上代理（连不上只告警）。看日志里的 `run pods with network=egress reach the egress proxy and not the API server`。
 - 验证：`bash tests/kind/egress.sh`（kind + Calico；会把测试名单和 `IDP_EGRESS_ALLOW_PRIVATE` 留在集群上，只用于测试集群）。
+
+**知识库摄入实例（D25）**：同一个镜像再起一个实例，用自己的配置（`IDP_SANDBOX_OWNER=ingest`、`IDP_SANDBOX_FILES_URL`＝idp-cmi 的内部文件端点、`IDP_SANDBOX_TRANSFER_MB=50`、`IDP_SANDBOX_WORKSPACE_MB>=160`、`IDP_SANDBOX_TIMEOUT_S=300`、`IDP_SANDBOX_MEMORY_MB=512`、`IDP_SANDBOX_MAX_CONCURRENT=8`、`IDP_SANDBOX_MAX_PER_CALLER>=` 并发数、`IDP_SANDBOX_IDLE_MIN=5`）。Kubernetes 上它用自己的运行命名空间（`IDP_SANDBOX_NAMESPACE`），`ResourceQuota` 的 `configmaps` 至少 60（默认清单是 48，放不下 50 MiB 的文件：每块 1,000,000 字节一个 ConfigMap，要 53 个）。依据与数字见 README 的"知识库摄入实例"与 ADR D25。**沙箱不验票据的签名**（只比对租户、主体与种类），文件端点必须自己验。
 
 ## 4. 部署与检查
 

@@ -266,7 +266,8 @@ func TestOfficeLanguageFollowsTheOperatorsConfiguration(t *testing.T) {
 	cfg.Languages["office"] = sandbox.OfficeLanguage("idp-sandbox-office:dev")
 	enum, desc = langs(cfg)
 	if fmt.Sprint(enum) != "[office python shell]" || !strings.Contains(desc, "office: a POSIX shell script with the officecli command") || !strings.Contains(desc, "sheetskel FILE.xlsx") ||
-		!strings.Contains(desc, "pdftext FILE.pdf") || !strings.Contains(desc, "md2pdf IN.md OUT.pdf") {
+		!strings.Contains(desc, "pdftext FILE.pdf") || !strings.Contains(desc, "md2pdf IN.md OUT.pdf") ||
+		!strings.Contains(desc, "ooxml2md IN.docx|IN.pptx|IN.xlsx -o OUT.md") || !strings.Contains(desc, "pdftext FILE.pdf --markdown OUT.md") {
 		t.Fatalf("%v %q", enum, desc)
 	}
 	if cfg.Languages["office"].Image != "idp-sandbox-office:dev" || fmt.Sprint(cfg.Languages["office"].Command("main.sh")) != "[sh main.sh]" {

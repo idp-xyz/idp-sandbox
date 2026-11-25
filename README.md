@@ -20,9 +20,39 @@ IDP TELOS 的 Agent 执行沙箱：一个 MCP 服务器，让 Agent 在隔离的
 
 ## 工具
 
-`sandbox_create`、`sandbox_run`（`python`、`shell`，运维配置了 office 镜像时还有 `office`：带 [OfficeCLI](https://github.com/iOfficeAI/OfficeCLI) 的 shell，读写 Word / Excel / PowerPoint，ADR-0001 D14；镜像里另装了 `sheetmap` 与 `sheetcheck`，但没有向模型宣布（D23：实测没有减少步数）；还能读 PDF（`pdftext`）、把 Markdown 排成带中文字体的 PDF（`md2pdf`），D17）、`sandbox_write_file`、`sandbox_read_file`、`sandbox_list_files`、`sandbox_delete`；运维配置了 Workspace 的文件端点时还有 `sandbox_import_file`、`sandbox_export_file`：把成员附上的文件拷进工作区、把做好的文件交给成员，字节不经过模型（ADR-0001 D15）。经网关时名字带上目标名前缀（`sandbox__sandbox_run`）。
+`sandbox_create`、`sandbox_run`（`python`、`shell`，运维配置了 office 镜像时还有 `office`：带 [OfficeCLI](https://github.com/iOfficeAI/OfficeCLI) 的 shell，读写 Word / Excel / PowerPoint，ADR-0001 D14；镜像里另装了 `sheetmap` 与 `sheetcheck`，但没有向模型宣布（D23：实测没有减少步数）；还能读 PDF（`pdftext`）、把 Markdown 排成带中文字体的 PDF（`md2pdf`），D17）；还有把文档转成带定位标记的 Markdown 的 `ooxml2md`（Word / PowerPoint / Excel）与 `pdftext --markdown`（PDF），D25，给知识库摄入用、`sandbox_write_file`、`sandbox_read_file`、`sandbox_list_files`、`sandbox_delete`；运维配置了 Workspace 的文件端点时还有 `sandbox_import_file`、`sandbox_export_file`：把成员附上的文件拷进工作区、把做好的文件交给成员，字节不经过模型（ADR-0001 D15）。经网关时名字带上目标名前缀（`sandbox__sandbox_run`）。
 
 运维手册：[`docs/RUNBOOK.md`](docs/RUNBOOK.md)（接入、后端、配置、故障排查、安全边界）。
+
+## 知识库摄入实例（D25）
+
+知识库的摄入（idp-cmi，KB3）用**另一个 idp-sandbox 实例**：同一份代码与办公镜像，另配限额，文件端点指向 idp-cmi 的内部文件接口，在网关上登记为另一个上游。它在办公镜像里用两个转换器，把 Word、PowerPoint、Excel、PDF 的原件转成 Markdown，标记格式见平台仓库的 `docs/adr/kb3-converter-format.md`：
+
+```
+ooxml2md IN.docx|IN.pptx|IN.xlsx -o OUT.md      # <!-- page: N -->（显式分页符）、<!-- slide: N -->、<!-- table: N rows x M cols -->、<!-- sheet: NAME range: A1:F100 -->
+pdftext  IN.pdf --markdown OUT.md               # <!-- page: N -->，没有文字的页另有 <!-- no-text: page N ... -->，不受 12 秒与 12000 字节的限制
+```
+
+退出码（两个命令一样）：`0` 写出了非空的结果（Excel 被截断也是 0，看 `<!-- truncated: ... -->`）；`1` 其它错误；`2` 用法；`3` 不支持（旧格式、带宏、加密、要密码）；`4` 文件损坏；`5` 超限（输出、嵌套、内存）；`6` 没有任何正文（扫描件）。失败不留 `OUT.md`。Excel 流式读取，每个工作表至多 1 万个非空行、200 列。
+
+**摄入实例的配置**（这些都是已有的环境变量，不改代码；数字来自 ADR D25 的实测）：
+
+| 项 | 值 | 为什么 |
+|---|---|---|
+| `IDP_SANDBOX_TRANSFER_MB` | 50 | 与 CMI 的上传上限一致 |
+| `IDP_SANDBOX_WORKSPACE_MB` | 至少 160 | 50 MiB 的原件 + 至多 64 MiB 的结果 + 余量 |
+| `IDP_SANDBOX_TIMEOUT_S` | 300 | 实测最慢的是 100 万行的表，27 秒；扫描密集的大 PDF 另算。网关的 `IDP_CALL_TIMEOUT` 要大于它（网关默认 60 秒，会把长运行记成 `UNKNOWN`），所以摄入走专用网关 |
+| `IDP_SANDBOX_MEMORY_MB` | 512 | 转换器实测最多 83 MB（含 24 MiB 的图片型 PDF）；服务进程另需约 110 MiB 乘并发数（文件在内存里过一遍），所以服务容器至少 1 GiB |
+| `IDP_SANDBOX_MAX_CONCURRENT` | 8（按机器定） | 超出的调用立即被拒，CMI 自己排队重试 |
+| `IDP_SANDBOX_MAX_PER_CALLER` | 至少等于并发数（建议 16），`IDP_SANDBOX_MAX_WORKSPACES` 不小于它 | 摄入只有一个工作负载身份，所有工作区都算在这一个调用者名下；默认的 8 在并发 8 加一个正在删除的工作区时就会拒绝 |
+| `IDP_SANDBOX_IDLE_MIN` | 5 | CMI 每次做完 `sandbox_delete`，这是兜底 |
+| `IDP_SANDBOX_OWNER` | 自己的值（如 `ingest`） | 启动清扫只碰同一标签的对象；与成员的实例不同才不会互相清扫 |
+| `IDP_SANDBOX_FILES_URL` | CMI 的内部文件端点 | 一个实例一个文件端点 |
+| Kubernetes：`IDP_SANDBOX_NAMESPACE` | 自己的运行命名空间，`ResourceQuota` 的 `configmaps` 至少 60 | 50 MiB 切成 53 块 ConfigMap；默认的 48 放不下（`deploy/kubernetes/runs-limits.yaml`）。`LimitRange` 的容器内存上限 1 Gi 够用 |
+
+**沙箱不验票据的签名。** `sandbox_import_file` / `sandbox_export_file` 只看票据里的 `tenant_id`、`sub`、`kind`，与调用者比对后把整张票原样交给文件端点；签名、受众、有效期、一次性都要文件端点（CMI）自己验。这是现有的行为（D15），摄入实例照旧，不是本期改的。
+
+**改了 `language: office` 的说明**：`ooxml2md` 与 `pdftext --markdown` 写进了说明，所以 `sandbox_run` 的 schema 变了。网关钉住的是发现时的目录：已经在运行的部署，升级沙箱后要在网关**重新发现、重新评审、重新发布**（见 `docs/RUNBOOK.md`）；不做，网关的漂移检查会拒绝这些调用。
 
 ## 使用
 

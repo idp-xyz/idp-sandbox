@@ -23,11 +23,12 @@ type Language struct {
 }
 
 // OfficeLanguage is the office run profile (ADR-0001 D14, D17): a POSIX shell script in the operator's office image, which
-// has officecli on its PATH for .docx, .xlsx and .pptx files in the workspace, and pdftext and md2pdf for PDF. Same
+// has officecli on its PATH for .docx, .xlsx and .pptx files in the workspace, pdftext and md2pdf for PDF, and ooxml2md
+// (with pdftext --markdown) for the Markdown of a document with locators (D25). Same
 // isolation and limits as any other run.
 func OfficeLanguage(image string) Language {
 	return Language{Image: image, File: "main.sh", Command: func(f string) []string { return []string{"sh", f} },
-		Description: "a POSIX shell script with the officecli command on PATH, for reading, editing and creating .docx, .xlsx and .pptx files in the workspace (officecli help lists the commands). sheetskel FILE.xlsx prints each sheet's name, used range and header row; use it instead of unpacking the workbook. pdftext FILE.pdf prints a PDF's pages as text, and md2pdf IN.md OUT.pdf writes a PDF from Markdown, Chinese included"}
+		Description: "a POSIX shell script with the officecli command on PATH, for reading, editing and creating .docx, .xlsx and .pptx files in the workspace (officecli help lists the commands). sheetskel FILE.xlsx prints each sheet's name, used range and header row; use it instead of unpacking the workbook. pdftext FILE.pdf prints a PDF's pages as text, and md2pdf IN.md OUT.pdf writes a PDF from Markdown, Chinese included. ooxml2md IN.docx|IN.pptx|IN.xlsx -o OUT.md writes a Word, PowerPoint or Excel file as Markdown (headings, tables with their cells, <!-- page: N -->, <!-- slide: N --> and <!-- sheet: NAME range: A1:F100 --> markers; a sheet is cut at 10000 rows and 200 columns, and says so), and pdftext FILE.pdf --markdown OUT.md writes a whole PDF the same way with a <!-- page: N --> marker per page. Both exit 0 only when they wrote a file that has text"}
 }
 
 // Config of the manager.

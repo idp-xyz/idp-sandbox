@@ -671,11 +671,13 @@ def has_value(c):
 
 def rows_of(zf, part):
     """Yield (row number, [(column, <c> element)]) for each non-empty row of a sheet, as a stream."""
-    row, prev, cells, wanted = 0, 0, [], False
+    row, prev, cells, data = 0, 0, [], None
     for event, el in iterparse(zf, part):
         tag = sheetlib.local(el.tag)
         if event == "start":
-            if tag == "row":
+            if tag == "sheetData":
+                data = el  # a cleared row stays in its parent: the parent is emptied after every row
+            elif tag == "row":
                 ref = el.get("r")
                 row = int(ref) if ref and ref.isdigit() else row + 1
                 prev, cells = 0, []
@@ -692,6 +694,8 @@ def rows_of(zf, part):
                 yield row, cells
             cells = []
             el.clear()
+            if data is not None:
+                data.clear()
 
 
 def scan_workbook(zf, sheets, max_rows, max_cols):
@@ -728,13 +732,16 @@ def shared_strings(zf, need):
     out = {}
     if not need or "xl/sharedStrings.xml" not in zf.namelist():
         return out
-    index = 0
-    for _, el in iterparse(zf, "xl/sharedStrings.xml", events=("end",)):
-        if sheetlib.local(el.tag) == "si":
+    index, root = 0, None
+    for event, el in iterparse(zf, "xl/sharedStrings.xml"):
+        if event == "start":
+            root = root if root is not None else el
+        elif sheetlib.local(el.tag) == "si":
             if index in need:
                 out[index] = sheetlib.si_text(el)[:MAX_CELL]
             index += 1
             el.clear()
+            root.clear()
     return out
 
 
