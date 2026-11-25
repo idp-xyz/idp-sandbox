@@ -34,8 +34,8 @@ func env(k, def string) string {
 
 func setup(t *testing.T, tweak func(*sandbox.Config)) *sandbox.Manager {
 	t.Helper()
-	shell := env("IDP_SANDBOX_SHELL_IMAGE", "public.ecr.aws/docker/library/alpine:3.22")
-	py := env("IDP_SANDBOX_PYTHON_IMAGE", "public.ecr.aws/docker/library/python:3.12-slim")
+	shell := env("IDP_SANDBOX_SHELL_IMAGE", "ghcr.io/idp-xyz/mirror:public.ecr.aws__docker__library__alpine__3.22")
+	py := env("IDP_SANDBOX_PYTHON_IMAGE", "ghcr.io/idp-xyz/mirror:public.ecr.aws__docker__library__python__3.12-slim")
 	eng, err := engine.New(env("IDP_SANDBOX_DOCKER_HOST", "unix:///var/run/docker.sock"), shell)
 	if err != nil {
 		t.Skip(err)

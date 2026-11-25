@@ -14,8 +14,7 @@ if [[ "${APPLY:-0}" == 1 ]]; then
 fi
 if [[ "${LOAD_LOCAL_IMAGES:-0}" == 1 ]]; then
   tar="$(mktemp --suffix=.tar)"
-  docker image inspect alpine:3.22 >/dev/null 2>&1 || docker tag public.ecr.aws/docker/library/alpine:3.22 alpine:3.22
-  docker save --platform linux/amd64 alpine:3.22 -o "$tar" 2>/dev/null || docker save alpine:3.22 -o "$tar"
+  docker save --platform linux/amd64 ghcr.io/idp-xyz/mirror:public.ecr.aws__docker__library__alpine__3.22 -o "$tar" 2>/dev/null || docker save ghcr.io/idp-xyz/mirror:public.ecr.aws__docker__library__alpine__3.22 -o "$tar"
   kind load image-archive "$tar" --name "$CLUSTER" >/dev/null; rm -f "$tar"
 fi
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT

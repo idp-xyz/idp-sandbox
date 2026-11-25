@@ -8,7 +8,7 @@
 //	                           IDP_SANDBOX_PRIVATE_NETWORK=true (the operator's statement that only the gateway reaches it)
 //	IDP_SANDBOX_METRICS        address of /healthz /readyz /metrics (default 127.0.0.1:9570)
 //	IDP_SANDBOX_DOCKER_HOST    default unix:///var/run/docker.sock
-//	IDP_SANDBOX_PYTHON_IMAGE   default python:3.12-slim      IDP_SANDBOX_SHELL_IMAGE  default alpine:3.22
+//	IDP_SANDBOX_PYTHON_IMAGE   default ghcr.io/idp-xyz/mirror:public.ecr.aws__docker__library__python__3.12-slim      IDP_SANDBOX_SHELL_IMAGE  default ghcr.io/idp-xyz/mirror:public.ecr.aws__docker__library__alpine__3.22
 //	IDP_SANDBOX_OFFICE_IMAGE   the office run profile's image (ADR-0001 D14, deploy/office); unset = no language office
 //	IDP_SANDBOX_RUNTIME        OCI runtime of the runs, for example runsc (gVisor) or kata; default the daemon's
 //	IDP_SANDBOX_OWNER          label value that scopes the sweep (default "default")
@@ -119,7 +119,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "refusing to listen on", listen, "without IDP_SANDBOX_PRIVATE_NETWORK=true: this server has no authentication, only the gateway may reach it")
 		os.Exit(2)
 	}
-	cfg := sandbox.DefaultConfig(env("IDP_SANDBOX_PYTHON_IMAGE", "python:3.12-slim"), env("IDP_SANDBOX_SHELL_IMAGE", "alpine:3.22"))
+	cfg := sandbox.DefaultConfig(env("IDP_SANDBOX_PYTHON_IMAGE", "ghcr.io/idp-xyz/mirror:public.ecr.aws__docker__library__python__3.12-slim"), env("IDP_SANDBOX_SHELL_IMAGE", "ghcr.io/idp-xyz/mirror:public.ecr.aws__docker__library__alpine__3.22"))
 	if img := os.Getenv("IDP_SANDBOX_OFFICE_IMAGE"); img != "" {
 		cfg.Languages["office"] = sandbox.OfficeLanguage(img)
 	}
@@ -160,7 +160,7 @@ func main() {
 	var be sandbox.Backend
 	switch backend := env("IDP_SANDBOX_BACKEND", "docker"); backend {
 	case "docker":
-		eng, err := engine.New(env("IDP_SANDBOX_DOCKER_HOST", "unix:///var/run/docker.sock"), env("IDP_SANDBOX_SHELL_IMAGE", "alpine:3.22"))
+		eng, err := engine.New(env("IDP_SANDBOX_DOCKER_HOST", "unix:///var/run/docker.sock"), env("IDP_SANDBOX_SHELL_IMAGE", "ghcr.io/idp-xyz/mirror:public.ecr.aws__docker__library__alpine__3.22"))
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)

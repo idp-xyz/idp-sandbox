@@ -36,7 +36,7 @@ func TestBinaryFilesOnARealCluster(t *testing.T) {
 	const limit = 25 << 20 // the service's default IDP_SANDBOX_TRANSFER_MB
 	k, err := kube.New(kube.Config{APIServer: api, TokenFile: os.Getenv("IDP_SANDBOX_KUBE_TOKEN_FILE"), CAFile: os.Getenv("IDP_SANDBOX_KUBE_CA_FILE"),
 		Namespace: env("IDP_SANDBOX_NAMESPACE", "idp-sandbox-runs"), Owner: env("IDP_SANDBOX_OWNER", "transfer-test"),
-		HelperImage: env("IDP_SANDBOX_SHELL_IMAGE", "alpine:3.22"), RuntimeClass: os.Getenv("IDP_SANDBOX_RUNTIME_CLASS"),
+		HelperImage: env("IDP_SANDBOX_SHELL_IMAGE", "ghcr.io/idp-xyz/mirror:public.ecr.aws__docker__library__alpine__3.22"), RuntimeClass: os.Getenv("IDP_SANDBOX_RUNTIME_CLASS"),
 		StorageClass: os.Getenv("IDP_SANDBOX_STORAGE_CLASS"), WorkspaceBytes: 64 << 20, MaxWriteBytes: limit})
 	if err != nil {
 		t.Fatal(err)
@@ -99,7 +99,7 @@ func TestBinaryFilesOnARealCluster(t *testing.T) {
 	lim := sandbox.Limits{MemoryBytes: 128 << 20, CPUs: 1, Pids: 32, Timeout: 60 * time.Second, OutputBytes: 64 << 10, WorkspaceBytes: 64 << 20, TmpBytes: 4 << 20}
 	run := func(script string) sandbox.RunResult {
 		t.Helper()
-		res, err := k.Run(ctx, sandbox.RunSpec{Workspace: ws, Image: env("IDP_SANDBOX_SHELL_IMAGE", "alpine:3.22"), Cmd: []string{"sh", "-c", script}, Limits: lim, Timeout: 60 * time.Second})
+		res, err := k.Run(ctx, sandbox.RunSpec{Workspace: ws, Image: env("IDP_SANDBOX_SHELL_IMAGE", "ghcr.io/idp-xyz/mirror:public.ecr.aws__docker__library__alpine__3.22"), Cmd: []string{"sh", "-c", script}, Limits: lim, Timeout: 60 * time.Second})
 		if err != nil || res.ExitCode != 0 {
 			t.Fatalf("run %q: %+v %v", script, res, err)
 		}
@@ -159,7 +159,7 @@ func TestNetworkProbeOnARealCluster(t *testing.T) {
 	}
 	k, err := kube.New(kube.Config{APIServer: api, TokenFile: os.Getenv("IDP_SANDBOX_KUBE_TOKEN_FILE"), CAFile: os.Getenv("IDP_SANDBOX_KUBE_CA_FILE"),
 		Namespace: env("IDP_SANDBOX_NAMESPACE", "idp-sandbox-runs"), Owner: env("IDP_SANDBOX_OWNER", "transfer-test"),
-		HelperImage: env("IDP_SANDBOX_SHELL_IMAGE", "alpine:3.22"), RuntimeClass: os.Getenv("IDP_SANDBOX_RUNTIME_CLASS")})
+		HelperImage: env("IDP_SANDBOX_SHELL_IMAGE", "ghcr.io/idp-xyz/mirror:public.ecr.aws__docker__library__alpine__3.22"), RuntimeClass: os.Getenv("IDP_SANDBOX_RUNTIME_CLASS")})
 	if err != nil {
 		t.Fatal(err)
 	}

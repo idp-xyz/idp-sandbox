@@ -8,7 +8,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 BIN="$HOME/.local/bin"; mkdir -p "$BIN"; export PATH="$BIN:$PATH"
-NODE=kindest/node:v1.35.0 CALICO=v3.30.3
+NODE=ghcr.io/idp-xyz/mirror:docker.io__kindest__node__v1.35.0 CALICO=v3.30.3
 command -v kubectl >/dev/null || curl -sL -o "$BIN/kubectl" "https://dl.k8s.io/release/$(curl -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" && chmod +x "$BIN/kubectl"
 command -v kind >/dev/null || GOBIN="$BIN" go install sigs.k8s.io/kind@v0.31.0
 command -v crane >/dev/null || GOBIN="$BIN" go install github.com/google/go-containerregistry/cmd/crane@latest
@@ -22,8 +22,8 @@ if [[ -z "$(docker inspect $N -f '{{with .NetworkSettings.Networks.kind.IPAMConf
   docker stop $N >/dev/null && docker network disconnect kind $N && docker network connect --ip "$IP" kind $N && docker start $N >/dev/null
   for _ in $(seq 120); do kubectl get --raw /readyz >/dev/null 2>&1 && break; sleep 1; done
 fi
-for i in cni node kube-controllers; do crane pull "quay.io/calico/$i:$CALICO" "$T/$i.tar" && kind load image-archive "$T/$i.tar" --name kind >/dev/null; done
-curl -s "https://raw.githubusercontent.com/projectcalico/calico/$CALICO/manifests/calico.yaml" | sed 's#docker.io/calico/#quay.io/calico/#' | kubectl apply -f - >/dev/null
+for i in cni node kube-controllers; do crane pull "ghcr.io/idp-xyz/mirror:quay.io__calico__${i}__$CALICO" "$T/$i.tar" && kind load image-archive "$T/$i.tar" --name kind >/dev/null; done   # mirror:variable (cni, node, kube-controllers)
+curl -s "https://raw.githubusercontent.com/projectcalico/calico/$CALICO/manifests/calico.yaml" | sed -E 's#docker\.io/calico/([a-z-]+):#ghcr.io/idp-xyz/mirror:quay.io__calico__\1__#' | kubectl apply -f - >/dev/null   # mirror:variable
 kubectl -n kube-system rollout status ds/calico-node --timeout=300s
 kubectl wait --for=condition=Ready nodes --all --timeout=300s
 echo "OK: kind cluster 'kind' with Calico"

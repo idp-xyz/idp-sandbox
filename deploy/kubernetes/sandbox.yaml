@@ -65,9 +65,9 @@ spec:
             # - name: IDP_SANDBOX_CALLER_AUDIENCE
             #   value: http://idp-sandbox.idp-sandbox.svc.cluster.local:8570/mcp
             - name: IDP_SANDBOX_PYTHON_IMAGE         # pin by digest; pulled by the nodes, never chosen by callers
-              value: python:3.12-slim
+              value: ghcr.io/idp-xyz/mirror:public.ecr.aws__docker__library__python__3.12-slim
             - name: IDP_SANDBOX_SHELL_IMAGE
-              value: alpine:3.22
+              value: ghcr.io/idp-xyz/mirror:public.ecr.aws__docker__library__alpine__3.22
           readinessProbe:
             httpGet:
               path: /readyz

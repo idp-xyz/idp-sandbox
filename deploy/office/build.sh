@@ -74,7 +74,7 @@ for pin in "${PINS[@]}"; do
   read -r _ dir file _ <<< "$pin"
   install -m 0644 "$CACHE/$file" "$OUT/$dir/$file"
 done
-bash deploy/pull-image.sh "$BASE"   # with retries, so that docker build does not pull the base
+bash deploy/pull-image.sh "$BASE"   # with retries, so that docker build does not pull the base   # mirror:variable (BASE is a mirror name)
 DOCKER_BUILDKIT=1 docker build --network none -q --build-arg "BASE=$BASE" -t "$TAG" "$OUT" >/dev/null
 smoke() { # a command in the image, under the restrictions of a sandbox run
   docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --user 65534:65534 \

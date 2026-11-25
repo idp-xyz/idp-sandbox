@@ -19,7 +19,7 @@ load_image() {
 # images). LOAD_LOCAL_IMAGES=1 (a machine whose nodes cannot reach Docker Hub): load the ones the Docker daemon
 # already has, from the mirrors the other scripts use, under the names the manifests ask for.
 if [[ "${LOAD_LOCAL_IMAGES:-0}" == 1 ]]; then
-  for pair in public.ecr.aws/docker/library/python:3.12-slim=python:3.12-slim public.ecr.aws/docker/library/alpine:3.22=alpine:3.22; do
+  for pair in ghcr.io/idp-xyz/mirror:public.ecr.aws__docker__library__python__3.12-slim=ghcr.io/idp-xyz/mirror:public.ecr.aws__docker__library__python__3.12-slim ghcr.io/idp-xyz/mirror:public.ecr.aws__docker__library__alpine__3.22=ghcr.io/idp-xyz/mirror:public.ecr.aws__docker__library__alpine__3.22; do
     docker tag "${pair%%=*}" "${pair##*=}"; load_image "${pair##*=}"
   done
 fi

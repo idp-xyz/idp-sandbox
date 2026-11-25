@@ -1,6 +1,6 @@
 # The office run profile of idp-sandbox (ADR-0001 D14): the python run image with a pinned, checksum-verified officecli.
 # Built by deploy/office/build.sh with --network none; every file is checked before it reaches this context.
-ARG BASE=python:3.12-slim
+ARG BASE=ghcr.io/idp-xyz/mirror:public.ecr.aws__docker__library__python__3.12-slim
 FROM ${BASE}
 COPY officecli /usr/local/bin/officecli
 COPY sheetskel /usr/local/bin/sheetskel

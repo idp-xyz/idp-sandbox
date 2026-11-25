@@ -48,7 +48,7 @@ trap cleanup EXIT
 # the third-party images: PostgreSQL (named by the compose file) and the runtime images the sandbox starts and the checks below run
 # (the sandbox never pulls them itself), pulled here with retries so that neither compose nor docker run has to
 mapfile -t THIRD < <("${C[@]}" config --images postgres)
-bash deploy/pull-image.sh "${THIRD[@]}" "${IDP_SANDBOX_PYTHON_IMAGE:-public.ecr.aws/docker/library/python:3.12-slim}" "${IDP_SANDBOX_SHELL_IMAGE:-public.ecr.aws/docker/library/alpine:3.22}"
+bash deploy/pull-image.sh "${THIRD[@]}" "${IDP_SANDBOX_PYTHON_IMAGE:-ghcr.io/idp-xyz/mirror:public.ecr.aws__docker__library__python__3.12-slim}" "${IDP_SANDBOX_SHELL_IMAGE:-ghcr.io/idp-xyz/mirror:public.ecr.aws__docker__library__alpine__3.22}"
 "${C[@]}" up -d --wait postgres sandbox
 "${C[@]}" run --rm -T registry-admin migrate
 "${C[@]}" run --rm -T registry-admin ensure-login idp_mcp_svc
@@ -75,9 +75,9 @@ status=$?
 # cannot sign. The sandbox must refuse it before any tool runs (D18).
 NET="$(docker inspect -f '{{range $k, $_ := .NetworkSettings.Networks}}{{$k}}{{end}}' "$("${C[@]}" ps -q sandbox)")"
 BODY='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"sandbox_create","arguments":{},"_meta":{"io.idp.telos/caller":{"subject":"agent-host","tenant":"x","roles":["operator"]},"io.idp.telos/caller-assertion":"eyJhbGciOiJub25lIn0.e30.","io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}'
-DIRECT="$(docker run --rm --network "$NET" "${IDP_SANDBOX_SHELL_IMAGE:-public.ecr.aws/docker/library/alpine:3.22}" \
+DIRECT="$(docker run --rm --network "$NET" "${IDP_SANDBOX_SHELL_IMAGE:-ghcr.io/idp-xyz/mirror:public.ecr.aws__docker__library__alpine__3.22}" \
   wget -q -O - --header 'Content-Type: application/json' --header 'MCP-Protocol-Version: 2026-07-28' --header 'Mcp-Method: tools/call' --post-data "$BODY" http://sandbox:8570/mcp 2>&1 || true)"
-LISTED="$(docker run --rm --network "$NET" "${IDP_SANDBOX_SHELL_IMAGE:-public.ecr.aws/docker/library/alpine:3.22}" \
+LISTED="$(docker run --rm --network "$NET" "${IDP_SANDBOX_SHELL_IMAGE:-ghcr.io/idp-xyz/mirror:public.ecr.aws__docker__library__alpine__3.22}" \
   wget -q -O - --header 'Content-Type: application/json' --header 'MCP-Protocol-Version: 2026-07-28' --header 'Mcp-Method: tools/list' \
   --post-data '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}' http://sandbox:8570/mcp 2>&1 || true)"
 if [[ "$DIRECT" == *"403"* && "$DIRECT" != *workspaceId* && "$LISTED" == *sandbox_create* ]] && "${C[@]}" logs sandbox 2>/dev/null | grep -q 'caller assertion refused'; then

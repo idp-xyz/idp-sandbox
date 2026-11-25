@@ -31,7 +31,7 @@ func egressSetup(t *testing.T) *sandbox.Manager { return egressSetupWith(t, nil,
 // mounted: the gVisor suite runs against a Docker daemon in a container, which does not see this machine's files.
 func egressSetupWith(t *testing.T, serviceKey, key []byte, tenants string) *sandbox.Manager {
 	t.Helper()
-	py := env("IDP_SANDBOX_PYTHON_IMAGE", "public.ecr.aws/docker/library/python:3.12-slim")
+	py := env("IDP_SANDBOX_PYTHON_IMAGE", "ghcr.io/idp-xyz/mirror:public.ecr.aws__docker__library__python__3.12-slim")
 	if err := exec.Command("docker", "info").Run(); err != nil {
 		t.Skip("no docker")
 	}
@@ -76,7 +76,7 @@ func egressSetupWith(t *testing.T, serviceKey, key []byte, tenants string) *sand
 	})
 	time.Sleep(1500 * time.Millisecond)
 
-	shell := env("IDP_SANDBOX_SHELL_IMAGE", "public.ecr.aws/docker/library/alpine:3.22")
+	shell := env("IDP_SANDBOX_SHELL_IMAGE", "ghcr.io/idp-xyz/mirror:public.ecr.aws__docker__library__alpine__3.22")
 	eng, err := engine.New(env("IDP_SANDBOX_DOCKER_HOST", "unix:///var/run/docker.sock"), shell)
 	if err != nil {
 		t.Skip(err)

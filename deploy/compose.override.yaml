@@ -22,8 +22,8 @@ services:
       IDP_SANDBOX_EGRESS_PROXY: ${IDP_SANDBOX_EGRESS_PROXY:-}   # idp-sandbox-egress with --profile egress
       # with the proxy: each run's proxy URL carries a credential that says the caller's tenant (D21)
       IDP_SANDBOX_EGRESS_KEY_FILE: ${IDP_SANDBOX_EGRESS_PROXY:+/etc/idp/egress.key}
-      IDP_SANDBOX_PYTHON_IMAGE: ${IDP_SANDBOX_PYTHON_IMAGE:-public.ecr.aws/docker/library/python:3.12-slim}
-      IDP_SANDBOX_SHELL_IMAGE: ${IDP_SANDBOX_SHELL_IMAGE:-public.ecr.aws/docker/library/alpine:3.22}
+      IDP_SANDBOX_PYTHON_IMAGE: ${IDP_SANDBOX_PYTHON_IMAGE:-ghcr.io/idp-xyz/mirror:public.ecr.aws__docker__library__python__3.12-slim}
+      IDP_SANDBOX_SHELL_IMAGE: ${IDP_SANDBOX_SHELL_IMAGE:-ghcr.io/idp-xyz/mirror:public.ecr.aws__docker__library__alpine__3.22}
   registry:
     environment:
       IDP_ALLOWED_UPSTREAM_HOSTS: minimal,reference,sandbox
