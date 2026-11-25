@@ -1,0 +1,935 @@
+#!/usr/bin/env python3
+"""Turn a Word, PowerPoint or Excel file into Markdown with locators (ADR-0001 D25; docs/adr/kb3-converter-format.md).
+
+    ooxml2md IN.docx|IN.pptx|IN.xlsx -o OUT.md
+
+Standard library only; nothing in the file is run or fetched. The result is written to OUT.md only when it is complete
+and has some text in it: the exit code is 0 for that and for nothing else (see EXIT below). Markers are whole-line HTML
+comments (<!-- page: N -->, <!-- slide: N -->, <!-- table: N rows x M cols -->, <!-- sheet: NAME range: A1:F100 -->,
+<!-- truncated: ... -->); "<!--" in the text of the file is written as "&lt;!--", so a document cannot forge one.
+Workbooks are read as a stream, in a bounded amount of memory, and cut at 10,000 rows and 200 columns a sheet.
+"""
+
+import argparse
+import os
+import posixpath
+import re
+import sys
+import zipfile
+import xml.etree.ElementTree as ET
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sheetlib  # noqa: E402  (the shared xlsx helpers: dates, numbers, shared-string text; it sits next to this file)
+
+EXIT = {"ok": 0, "internal": 1, "usage": 2, "unsupported": 3, "corrupt": 4, "limits": 5, "empty": 6}
+USAGE = """usage: ooxml2md IN.docx|IN.pptx|IN.xlsx -o OUT.md [--max-rows N] [--max-cols N] [--max-output-mb N] [--max-memory-mb N]
+
+  -o OUT.md           where the Markdown goes (written whole or not at all); -o - writes to standard output
+  --max-rows N        most non-empty rows of a sheet that are written (default 10000)
+  --max-cols N        most columns of a sheet that are written, from column A (default 200)
+  --max-output-mb N   largest result (default 64)
+  --max-memory-mb N   address space the conversion may use (default: 768, or three quarters of the
+                      container's memory when that is less); needing more is exit 5
+exit: 0 written; 1 other error; 2 usage; 3 unsupported; 4 corrupt; 5 limits exceeded; 6 no text in the file"""
+
+MAX_PART = 1 << 30      # bytes of one streamed XML part that are read (the package as a whole is capped by the transfer)
+MAX_SMALL = 32 << 20    # bytes of a part that is read whole (styles, numbering, relationships, one slide)
+MAX_CELL = 32767        # characters of a cell (Excel's own limit)
+MAX_DEPTH = 200         # nesting that is followed; deeper is refused (limits), not silently cut
+MAX_MEMORY_MB = 768     # address space of the process; an XML text node of 200 MB would otherwise take gigabytes
+
+W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+P = "{http://schemas.openxmlformats.org/presentationml/2006/main}"
+R = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+MC = "{http://schemas.openxmlformats.org/markup-compatibility/2006}"
+PAGE = object()  # a page break inside a paragraph
+
+
+class Fail(Exception):
+    def __init__(self, kind, message):
+        super().__init__(message)
+        self.kind = kind
+
+
+# ---- the package -------------------------------------------------------------------------------------------------------
+
+
+class Limited:
+    """A file object that refuses to give more than cap bytes (a part can claim a size in the zip directory and lie)."""
+
+    def __init__(self, f, cap, name):
+        self.f, self.cap, self.n, self.name = f, cap, 0, name
+
+    def read(self, size=-1):
+        data = self.f.read(size)
+        self.n += len(data)
+        if self.n > self.cap:
+            raise Fail("limits", f"{self.name} is larger than {self.cap} bytes")
+        return data
+
+    def close(self):
+        self.f.close()
+
+
+def stream(zf, name, cap=MAX_PART):
+    try:
+        return Limited(zf.open(name), cap, name)
+    except KeyError:
+        raise Fail("corrupt", f"the package has no {name}")
+    except (zipfile.BadZipFile, NotImplementedError, RuntimeError) as err:
+        raise Fail("corrupt" if not isinstance(err, (NotImplementedError, RuntimeError)) else "unsupported", f"{name}: {err}")
+
+
+def parse_small(zf, name, optional=False):
+    """The root element of a small part, or None when the part is optional and missing."""
+    try:
+        zf.getinfo(name)
+    except KeyError:
+        if optional:
+            return None
+        raise Fail("corrupt", f"the package has no {name}")
+    f = stream(zf, name, MAX_SMALL)
+    try:
+        return ET.fromstring(f.read(MAX_SMALL + 1))
+    except ET.ParseError as err:
+        raise Fail("corrupt", f"{name} is not well-formed XML ({err})")
+    finally:
+        f.close()
+
+
+def iterparse(zf, name, events=("start", "end")):
+    f = stream(zf, name)
+    try:
+        yield from ET.iterparse(f, events=events)
+    except ET.ParseError as err:
+        raise Fail("corrupt", f"{name} is not well-formed XML ({err})")
+    except (zipfile.BadZipFile, EOFError, OSError) as err:
+        raise Fail("corrupt", f"{name} cannot be read ({err})")
+    finally:
+        f.close()
+
+
+def relationships(zf, part):
+    """{Id: (Type, resolved target)} of the relationships file of a part."""
+    base, name = posixpath.split(part)
+    root = parse_small(zf, posixpath.join(base, "_rels", name + ".rels"), optional=True)
+    out = {}
+    for rel in root if root is not None else ():
+        target = rel.get("Target", "")
+        if rel.get("TargetMode") == "External":
+            continue
+        path = target.lstrip("/") if target.startswith("/") else posixpath.normpath(posixpath.join(base, target))
+        out[rel.get("Id", "")] = (rel.get("Type", "").rpartition("/")[2], path)
+    return out
+
+
+# ---- the output --------------------------------------------------------------------------------------------------------
+
+
+def clean(text):
+    """Text as the output carries it: no control characters, and nothing that reads as a marker."""
+    if not text:
+        return ""
+    text = "".join(ch for ch in text if ch in "\n\t" or ch >= " " and ch not in "\ufffe\uffff")
+    return text.replace("<!--", "&lt;!--")
+
+
+def marker_name(name):
+    return clean(name).replace("-->", "--&gt;").replace("\n", " ")
+
+
+class Output:
+    def __init__(self, path, limit):
+        self.path, self.limit, self.size, self.content = path, limit, 0, 0
+        self.part = None if path == "-" else path + ".part"
+        self.f = sys.stdout if path == "-" else open(self.part, "w", encoding="utf-8", newline="\n")
+
+    def line(self, text=""):
+        data = text + "\n"
+        self.size += len(data.encode("utf-8", "replace"))
+        if self.size > self.limit:
+            raise Fail("limits", f"the result is larger than {self.limit >> 20} MiB")
+        self.f.write(data)
+
+    def marker(self, text):
+        self.line(f"<!-- {text} -->")
+
+    def text(self, text):
+        """A line of content (it counts toward "the file has text")."""
+        if text.strip():
+            self.content += len(text.strip())
+        self.line(text)
+
+    def finish(self):
+        if self.part:
+            self.f.close()
+            os.replace(self.part, self.path)
+        else:
+            self.f.flush()
+
+    def discard(self):
+        if self.part:
+            try:
+                self.f.close()
+                os.unlink(self.part)  # our own temporary file, next to the output
+            except OSError:
+                pass
+
+
+LEAD = re.compile(r"^(\s*)(#{1,6}(\s|$)|[-+*>](\s|$)|\d+[.)](\s|$)|\||```|~~~|={3,}|-{3,})")
+
+
+def plain(text):
+    """A paragraph that cannot turn into a heading, a list, a quote or a table by what it starts with."""
+    return "\n".join(LEAD.sub(lambda m: m.group(1) + "\\" + m.group(2), line) for line in text.split("\n"))
+
+
+def cell(text):
+    return clean(text).strip().replace("\\", "\\\\").replace("|", "\\|").replace("\r", "").replace("\n", "<br>")
+
+
+def md_table(out, rows):
+    """A Markdown table of rows (lists of strings), with its table marker; the first row is the header."""
+    cols = max((len(r) for r in rows), default=0)
+    if not rows or not cols:
+        return
+    out.marker(f"table: {len(rows)} rows x {cols} cols")
+    for i, row in enumerate(rows):
+        row = list(row) + [""] * (cols - len(row))
+        out.text("| " + " | ".join(row) + " |")
+        if i == 0:
+            out.line("|" + "---|" * cols)
+    out.line()
+
+
+# ---- DOCX --------------------------------------------------------------------------------------------------------------
+
+HEADING = re.compile(r"(?i)^(?:heading|标题)\s*(\d)$")
+
+
+def val(el, name="val"):
+    return None if el is None else el.get(W + name)
+
+
+class DocStyles:
+    """What styles.xml says about heading level and list membership, through the basedOn chain."""
+
+    def __init__(self, zf):
+        self.by_id = {}
+        root = parse_small(zf, "word/styles.xml", optional=True)
+        for st in root.findall(W + "style") if root is not None else ():
+            ppr = st.find(W + "pPr")
+            num = ppr.find(f"{W}numPr") if ppr is not None else None
+            self.by_id[st.get(W + "styleId", "")] = {
+                "name": val(st.find(W + "name")) or "",
+                "based": val(st.find(W + "basedOn")),
+                "outline": val(ppr.find(W + "outlineLvl")) if ppr is not None else None,
+                "num": (val(num.find(W + "numId")), val(num.find(W + "ilvl"))) if num is not None else None,
+            }
+
+    def chain(self, sid):
+        seen = 0
+        while sid in self.by_id and seen < 12:
+            yield self.by_id[sid]
+            sid, seen = self.by_id[sid]["based"], seen + 1
+
+    def level(self, sid):
+        for st in self.chain(sid):
+            if st["outline"] is not None:
+                try:
+                    n = int(st["outline"])
+                except ValueError:
+                    continue
+                return n + 1 if n < 9 else 0
+            m = HEADING.match(st["name"].strip())
+            if m:
+                return int(m.group(1))
+            if st["name"].strip().lower() == "title":
+                return 1
+        return 0
+
+    def num(self, sid):
+        for st in self.chain(sid):
+            if st["num"] and st["num"][0] is not None:
+                return st["num"]
+        return None
+
+
+class Numbering:
+    """numId -> {ilvl: number format}, and the running numbers of the numbered lists."""
+
+    def __init__(self, zf):
+        self.formats, self.counts = {}, {}
+        root = parse_small(zf, "word/numbering.xml", optional=True)
+        if root is None:
+            return
+        abstract = {}
+        for an in root.findall(W + "abstractNum"):
+            abstract[an.get(W + "abstractNumId")] = {lv.get(W + "ilvl"): val(lv.find(W + "numFmt")) for lv in an.findall(W + "lvl")}
+        for num in root.findall(W + "num"):
+            self.formats[num.get(W + "numId")] = abstract.get(val(num.find(W + "abstractNumId")), {})
+
+    def marker(self, num_id, ilvl):
+        """'- ' for a bullet, '3. ' for a numbered item, indented by its level."""
+        try:
+            level = max(0, min(int(ilvl or 0), 8))
+        except ValueError:
+            level = 0
+        fmt = self.formats.get(num_id, {}).get(str(level), "bullet" if num_id not in self.formats else "decimal")
+        pad = "  " * level
+        if fmt in ("bullet", "none", None):
+            return pad + "- "
+        counts = self.counts.setdefault(num_id, [0] * 9)
+        counts[level] += 1
+        for deeper in range(level + 1, 9):
+            counts[deeper] = 0
+        return f"{pad}{counts[level]}. "
+
+
+def too_deep():
+    raise Fail("limits", f"nesting deeper than {MAX_DEPTH} levels")
+
+
+def children(el, depth=0):
+    """The block-level children of el, looking through content controls and other wrappers."""
+    for child in el:
+        tag = child.tag
+        if tag == W + "sdt":
+            content = child.find(W + "sdtContent")
+            if content is not None:
+                depth < MAX_DEPTH or too_deep()
+                yield from children(content, depth + 1)
+        elif tag in (W + "ins", W + "customXml", W + "smartTag", W + "moveTo"):
+            depth < MAX_DEPTH or too_deep()
+            yield from children(child, depth + 1)
+        elif tag == MC + "AlternateContent":
+            for choice in child.findall(MC + "Choice")[:1] or child.findall(MC + "Fallback")[:1]:
+                depth < MAX_DEPTH or too_deep()
+                yield from children(choice, depth + 1)
+        else:
+            yield child
+
+
+def tokens(p):
+    """The text of a paragraph in order: strings, and PAGE where the paragraph holds a page break. Text boxes are not
+    entered (walk_paragraphs finds their paragraphs), and neither is the fallback copy of a drawing."""
+    stack = [iter(p)]
+    while stack:
+        for el in stack[-1]:
+            tag = el.tag
+            if tag == W + "t":
+                yield el.text or ""
+            elif tag == W + "tab":
+                yield " "
+            elif tag == W + "br":
+                yield PAGE if el.get(W + "type") == "page" else "\n"
+            elif tag == W + "cr":
+                yield "\n"
+            elif tag == W + "noBreakHyphen":
+                yield "-"
+            elif tag in (W + "txbxContent", MC + "Fallback", W + "pPr", W + "rPr", W + "delText", W + "instrText", W + "del"):
+                continue
+            elif len(el):
+                len(stack) < MAX_DEPTH or too_deep()
+                stack.append(iter(el))
+                break
+        else:
+            stack.pop()
+
+
+def text_boxes(p):
+    """The text boxes of a paragraph, not their fallback copies."""
+    stack = [iter(p)]
+    while stack:
+        for el in stack[-1]:
+            if el.tag == W + "txbxContent":
+                yield el
+            elif el.tag != MC + "Fallback" and len(el):
+                len(stack) < MAX_DEPTH or too_deep()
+                stack.append(iter(el))
+                break
+        else:
+            stack.pop()
+
+
+def walk_paragraphs(el):
+    """Every paragraph below el in document order (those of nested tables and text boxes too), except in fallback copies."""
+    stack = [iter(el)]
+    while stack:
+        for child in stack[-1]:
+            if child.tag == W + "p":
+                yield child
+                for box in text_boxes(child):  # the paragraphs of a text box follow the paragraph that holds it
+                    yield from walk_paragraphs(box)
+            elif child.tag == MC + "Fallback":
+                continue
+            elif len(child):
+                len(stack) < MAX_DEPTH or too_deep()
+                stack.append(iter(child))
+                break
+        else:
+            stack.pop()
+
+
+def text_of(p):
+    return "".join(t for t in tokens(p) if t is not PAGE)
+
+
+def docx_cell(tc):
+    parts = [clean(text_of(p)).strip().replace("\n", " ") for p in walk_paragraphs(tc)]
+    return cell("<br>".join(x for x in parts if x).replace("<br>", "\n"))
+
+
+def docx_table(out, tbl):
+    rows = []
+    for tr in children(tbl):
+        if tr.tag != W + "tr":
+            continue
+        cells = []
+        for tc in children(tr):
+            if tc.tag != W + "tc":
+                continue
+            pr = tc.find(W + "tcPr")
+            span = 1
+            if pr is not None:
+                try:
+                    span = max(1, min(int(val(pr.find(W + "gridSpan")) or 1), 1000))
+                except ValueError:
+                    pass
+            vm = pr.find(W + "vMerge") if pr is not None else None
+            continued = vm is not None and (vm.get(W + "val") or "continue") == "continue"
+            cells.append("" if continued else docx_cell(tc))
+            cells.extend([""] * (span - 1))
+        rows.append(cells)
+    md_table(out, rows)
+
+
+def has_page_break(zf):
+    for _, el in iterparse(zf, "word/document.xml", events=("end",)):
+        if el.tag == W + "br" and el.get(W + "type") == "page" or el.tag == W + "pageBreakBefore":
+            return True
+        el.clear()
+    return False
+
+
+def docx(zf, out):
+    if "word/document.xml" not in zf.namelist():
+        raise Fail("corrupt", "the package has no word/document.xml: this is not a Word file")
+    styles, numbering = DocStyles(zf), Numbering(zf)
+    state = {"page": 1, "list": False}
+    if has_page_break(zf):
+        out.marker("page: 1")
+
+    def paragraph(p):
+        ppr = p.find(W + "pPr")
+        sid = val(ppr.find(W + "pStyle")) if ppr is not None else None
+        level = 0
+        if ppr is not None and ppr.find(W + "outlineLvl") is not None:
+            try:
+                n = int(val(ppr.find(W + "outlineLvl")))
+                level = n + 1 if n < 9 else 0
+            except (TypeError, ValueError):
+                level = 0
+        else:
+            level = styles.level(sid)
+        marker = ""
+        if not level:
+            num = ppr.find(f"{W}numPr") if ppr is not None else None
+            ref = (val(num.find(W + "numId")), val(num.find(W + "ilvl"))) if num is not None else styles.num(sid)
+            if ref and ref[0] not in (None, "0"):
+                marker = numbering.marker(ref[0], ref[1])
+        if ppr is not None and ppr.find(W + "pageBreakBefore") is not None and val(ppr.find(W + "pageBreakBefore")) not in ("0", "false"):
+            state["page"] += 1
+            out.marker(f"page: {state['page']}")
+        first, buf = True, []
+
+        def flush():
+            nonlocal first, buf
+            text = clean("".join(buf)).strip()
+            buf = []
+            if not text:
+                return
+            if level:
+                text = " ".join(text.split("\n"))
+                if state["list"]:
+                    out.line()
+                out.text("#" * min(level, 6) + " " + text)
+                out.line()
+                state["list"] = False
+            elif marker and first:
+                pad = " " * len(marker)
+                out.text(marker + plain(text).replace("\n", "\n" + pad))
+                state["list"] = True
+            else:
+                if state["list"]:
+                    out.line()
+                out.text(plain(text))
+                out.line()
+                state["list"] = False
+            first = False
+
+        for tok in tokens(p):
+            if tok is PAGE:
+                flush()
+                if state["list"]:
+                    out.line()
+                    state["list"] = False
+                state["page"] += 1
+                out.marker(f"page: {state['page']}")
+            else:
+                buf.append(tok)
+        flush()
+
+    def block(el):
+        if el.tag == W + "p":
+            paragraph(el)
+            for box in text_boxes(el):  # text boxes: their paragraphs follow, as paragraphs of their own
+                for q in walk_paragraphs(box):
+                    paragraph(q)
+        elif el.tag == W + "tbl":
+            if state["list"]:
+                out.line()
+                state["list"] = False
+            docx_table(out, el)
+
+    depth, body = 0, None
+    for event, el in iterparse(zf, "word/document.xml"):
+        if event == "start":
+            depth += 1
+            if depth == 2 and el.tag == W + "body":
+                body = el
+            continue
+        if depth == 3 and body is not None:
+            for item in children(_wrap(el)):
+                block(item)
+            body.clear()
+        depth -= 1
+    if state["list"]:
+        out.line()
+
+
+def _wrap(el):
+    """A one-element container, so that children() looks through a content control that is itself the element."""
+    box = ET.Element("box")
+    box.append(el)
+    return box
+
+
+# ---- PPTX --------------------------------------------------------------------------------------------------------------
+
+
+def a_text(p):
+    parts = []
+    for el in p.iter():
+        if el.tag == A + "t":
+            parts.append(el.text or "")
+        elif el.tag == A + "br":
+            parts.append("\n")
+    return clean("".join(parts)).strip()
+
+
+def a_fields_dropped(p):
+    """The paragraph without slide-number and date fields (they say nothing about the slide)."""
+    for fld in [f for f in p.findall(A + "fld") if (f.get("type") or "").startswith(("slidenum", "datetime"))]:
+        p.remove(fld)
+    return p
+
+
+def pptx_table(out, tbl):
+    rows = []
+    for tr in tbl.findall(A + "tr"):
+        cells = []
+        for tc in tr.findall(A + "tc"):
+            if tc.get("hMerge") in ("1", "true") or tc.get("vMerge") in ("1", "true"):
+                cells.append("")
+            else:
+                cells.append(cell("\n".join(x for x in (a_text(a_fields_dropped(p)) for p in tc.iter(A + "p")) if x)))
+        rows.append(cells)
+    md_table(out, rows)
+
+
+def slide_order(zf):
+    pres = "ppt/presentation.xml"
+    root = parse_small(zf, pres)
+    rels = relationships(zf, pres)
+    order = []
+    for sid in root.iter(P + "sldId"):
+        rel = rels.get(sid.get(R + "id", ""))
+        if rel and rel[1] in zf.namelist():
+            order.append(rel[1])
+    if not order:
+        order = sorted((n for n in zf.namelist() if re.fullmatch(r"ppt/slides/slide\d+\.xml", n)), key=lambda n: int(re.findall(r"\d+", n)[0]))
+    return order
+
+
+def shapes(tree):
+    """The shapes of a slide in z-order, entering groups."""
+    stack = [iter(tree)]
+    while stack:
+        for el in stack[-1]:
+            if el.tag == P + "grpSp":
+                len(stack) < MAX_DEPTH or too_deep()
+                stack.append(iter(el))
+                break
+            elif el.tag in (P + "sp", P + "graphicFrame"):
+                yield el
+        else:
+            stack.pop()
+
+
+def placeholder(sp):
+    ph = sp.find(f"{P}nvSpPr/{P}nvPr/{P}ph")
+    return None if ph is None else (ph.get("type") or "body")
+
+
+def pptx_paragraphs(out, sp, title_like):
+    body = sp.find(P + "txBody")
+    if body is None:
+        return
+    kind = placeholder(sp)
+    for p in body.findall(A + "p"):
+        text = a_text(a_fields_dropped(p))
+        if not text:
+            continue
+        ppr = p.find(A + "pPr")
+        bullet = ppr is not None and (ppr.find(A + "buChar") is not None or ppr.find(A + "buAutoNum") is not None)
+        nobullet = ppr is not None and ppr.find(A + "buNone") is not None
+        try:
+            level = int(ppr.get("lvl", "0")) if ppr is not None else 0
+        except ValueError:
+            level = 0
+        if bullet or (kind in ("body", "obj") and not nobullet) or level > 0:
+            numbered = ppr is not None and ppr.find(A + "buAutoNum") is not None
+            out.text("  " * min(level, 8) + ("1. " if numbered else "- ") + text.replace("\n", " "))
+        else:
+            out.text(plain(text))
+            out.line()
+    out.line()
+
+
+def pptx(zf, out):
+    if "ppt/presentation.xml" not in zf.namelist():
+        raise Fail("corrupt", "the package has no ppt/presentation.xml: this is not a PowerPoint file")
+    for number, part in enumerate(slide_order(zf), 1):
+        out.marker(f"slide: {number}")
+        root = parse_small(zf, part)
+        tree = root.find(f"{P}cSld/{P}spTree")
+        found = list(shapes(tree)) if tree is not None else []
+        titles = [sp for sp in found if sp.tag == P + "sp" and placeholder(sp) in ("title", "ctrTitle")]
+        for sp in titles:
+            body = sp.find(P + "txBody")
+            text = " ".join(x for x in (a_text(a_fields_dropped(p)) for p in (body.findall(A + "p") if body is not None else ())) if x)
+            if text:
+                out.text("# " + text.replace("\n", " "))
+                out.line()
+        for sp in found:
+            if sp in titles:
+                continue
+            if sp.tag == P + "sp":
+                if placeholder(sp) not in ("sldNum", "ftr", "dt"):
+                    pptx_paragraphs(out, sp, False)
+            else:
+                for tbl in sp.iter(A + "tbl"):
+                    pptx_table(out, tbl)
+        notes = [path for kind, path in relationships(zf, part).values() if kind == "notesSlide"]
+        if notes and notes[0] in zf.namelist():
+            nroot = parse_small(zf, notes[0])
+            lines = []
+            for sp in nroot.iter(P + "sp"):
+                if placeholder(sp) == "body":
+                    lines.extend(x for x in (a_text(a_fields_dropped(p)) for p in sp.iter(A + "p")) if x)
+            if lines:
+                out.marker(f"notes: slide {number}")
+                for line in lines:
+                    out.text(plain(line))
+                    out.line()
+
+
+# ---- XLSX --------------------------------------------------------------------------------------------------------------
+
+
+def cell_ref(el, row, prev):
+    """(row, column) of a <c>: from its r attribute, or the one after the previous cell."""
+    ref = el.get("r")
+    if ref:
+        r, c = sheetlib.split_ref(ref)
+        if r and c:
+            return r, c
+    return row, prev + 1
+
+
+def has_value(c):
+    for child in c:
+        tag = sheetlib.local(child.tag)
+        if tag == "v" and (child.text or "").strip():
+            return True
+        if tag == "is" and any((t.text or "").strip() for t in child.iter() if sheetlib.local(t.tag) == "t"):
+            return True
+    return False
+
+
+def rows_of(zf, part):
+    """Yield (row number, [(column, <c> element)]) for each non-empty row of a sheet, as a stream."""
+    row, prev, cells, wanted = 0, 0, [], False
+    for event, el in iterparse(zf, part):
+        tag = sheetlib.local(el.tag)
+        if event == "start":
+            if tag == "row":
+                ref = el.get("r")
+                row = int(ref) if ref and ref.isdigit() else row + 1
+                prev, cells = 0, []
+            continue
+        if tag == "c":
+            r, c = cell_ref(el, row, prev)
+            prev = c
+            if has_value(el):
+                cells.append((c, el))
+            else:
+                el.clear()
+        elif tag == "row":
+            if cells:
+                yield row, cells
+            cells = []
+            el.clear()
+
+
+def scan_workbook(zf, sheets, max_rows, max_cols):
+    """First pass: for each sheet the non-empty rows, the widest column, the bounding box of what will be written, and
+    which shared strings that needs. Only the counts and a set of integers are kept."""
+    need, info = set(), {}
+    for name, part, state in sheets:
+        if state != "visible":
+            continue
+        s = {"rows": 0, "maxcol": 0, "box": None}
+        for row, cells in rows_of(zf, part):
+            s["rows"] += 1
+            s["maxcol"] = max(s["maxcol"], max(c for c, _ in cells))
+            if s["rows"] > max_rows:
+                continue
+            for c, el in cells:
+                if c > max_cols:
+                    continue
+                box = s["box"]
+                s["box"] = (row, c, row, c) if box is None else (min(box[0], row), min(box[1], c), max(box[2], row), max(box[3], c))
+                if el.get("t") == "s":
+                    for v in el:
+                        if sheetlib.local(v.tag) == "v":
+                            try:
+                                need.add(int(v.text))
+                            except (TypeError, ValueError):
+                                pass
+        info[part] = s
+    return need, info
+
+
+def shared_strings(zf, need):
+    """Second pass: the text of the shared strings that are needed, and nothing else."""
+    out = {}
+    if not need or "xl/sharedStrings.xml" not in zf.namelist():
+        return out
+    index = 0
+    for _, el in iterparse(zf, "xl/sharedStrings.xml", events=("end",)):
+        if sheetlib.local(el.tag) == "si":
+            if index in need:
+                out[index] = sheetlib.si_text(el)[:MAX_CELL]
+            index += 1
+            el.clear()
+    return out
+
+
+def cell_text(el, strings, dates, date1904):
+    t = el.get("t", "n")
+    raw = inline = ""
+    for child in el:
+        tag = sheetlib.local(child.tag)
+        if tag == "v":
+            raw = child.text or ""
+        elif tag == "is":
+            inline = sheetlib.si_text(child)
+    if t == "inlineStr":
+        text = inline
+    elif t == "s":
+        try:
+            text = strings.get(int(raw), "")
+        except ValueError:
+            text = ""
+    elif t == "str":
+        text = sheetlib.unescape_x(raw)
+    elif t == "b":
+        text = "TRUE" if raw.strip() == "1" else "FALSE"
+    elif t in ("e", "d"):
+        text = raw
+    elif not raw.strip():
+        text = ""
+    else:
+        try:
+            style = int(el.get("s", "0") or 0)
+        except ValueError:
+            style = 0
+        text = sheetlib.date_text(raw, date1904) if style in dates else sheetlib.num_text(raw)
+    return cell(text[:MAX_CELL])
+
+
+def xlsx(zf, out, max_rows, max_cols):
+    names = zf.namelist()
+    if "xl/workbook.xml" not in names:
+        raise Fail("corrupt", "the package has no xl/workbook.xml: this is not an Excel file")
+    book = parse_small(zf, "xl/workbook.xml")
+    rels = relationships(zf, "xl/workbook.xml")
+    date1904 = any(sheetlib.attr(n, "date1904") in ("1", "true") for n in book.iter() if sheetlib.local(n.tag) == "workbookPr")
+    sheets = []
+    for node in book.iter():
+        if sheetlib.local(node.tag) == "sheet":
+            rel = rels.get(sheetlib.attr(node, "id"))
+            if rel and rel[1] in names:
+                sheets.append((sheetlib.attr(node, "name") or "(unnamed)", rel[1], sheetlib.attr(node, "state") or "visible"))
+    if not sheets:
+        raise Fail("corrupt", "the workbook has no sheets that can be read")
+    need, info = scan_workbook(zf, sheets, max_rows, max_cols)
+    strings = shared_strings(zf, need)
+    dates = sheetlib._date_styles(zf)
+    for name, part, state in sheets:
+        label = marker_name(name)
+        if state != "visible":
+            out.marker(f"skipped: sheet {label}, hidden")
+            continue
+        s = info[part]
+        if s["box"] is None:
+            out.marker(f"sheet: {label} empty")
+            continue
+        r1, c1, r2, c2 = s["box"]
+        out.marker(f"sheet: {label} range: {sheetlib.rng(r1, c1, r2, c2)}")
+        cols = range(c1, c2 + 1)
+        out.line("| row | " + " | ".join(sheetlib.col_name(c) for c in cols) + " |")
+        out.line("|" + "---|" * (len(cols) + 1))
+        kept = 0
+        for row, cells in rows_of(zf, part):
+            kept += 1
+            if kept > max_rows:
+                break
+            by_col = {c: el for c, el in cells if c <= max_cols}
+            texts = [cell_text(by_col[c], strings, dates, date1904) if c in by_col else "" for c in cols]
+            if any(texts):
+                out.text(f"| {row} | " + " | ".join(texts) + " |")
+        out.line()
+        if s["rows"] > max_rows:
+            out.marker(f"truncated: sheet {label}, rows kept {max_rows} of {s['rows']}")
+        if s["maxcol"] > max_cols:
+            out.marker(f"truncated: sheet {label}, columns kept {max_cols} of {s['maxcol']}")
+
+
+# ---- the command -------------------------------------------------------------------------------------------------------
+
+KINDS = {".docx": docx, ".pptx": pptx, ".xlsx": xlsx}
+OTHER = {".doc": "Word 97-2003", ".xls": "Excel 97-2003", ".ppt": "PowerPoint 97-2003", ".docm": "a macro-enabled file", ".xlsm": "a macro-enabled file",
+         ".pptm": "a macro-enabled file", ".dotx": "a template", ".xltx": "a template", ".potx": "a template", ".odt": "OpenDocument", ".ods": "OpenDocument", ".odp": "OpenDocument"}
+
+
+def convert(args):
+    ext = os.path.splitext(args.file)[1].lower()
+    if ext not in KINDS:
+        raise Fail("unsupported", f"{ext or 'a file without an extension'} is not supported" + (f" ({OTHER[ext]})" if ext in OTHER else "") + ": only .docx, .pptx and .xlsx")
+    if not os.path.isfile(args.file):
+        raise Fail("internal", f"{args.file}: no such file")
+    try:
+        zf = zipfile.ZipFile(args.file)
+    except zipfile.BadZipFile:
+        with open(args.file, "rb") as f:
+            if f.read(8) == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
+                raise Fail("unsupported", "the file is an old binary Office file or an encrypted one; neither is read")
+        raise Fail("corrupt", "the file is not a zip package")
+    out = Output(args.out, args.max_output_mb << 20)
+    try:
+        with zf:
+            names = zf.namelist()
+            if any(n.lower().endswith("vbaproject.bin") for n in names):
+                raise Fail("unsupported", "the file holds macros")
+            if ext == ".xlsx":
+                xlsx(zf, out, args.max_rows, args.max_cols)
+            else:
+                KINDS[ext](zf, out)
+        if not out.content:
+            raise Fail("empty", "the file has no text")
+        out.finish()
+    except BaseException:
+        out.discard()
+        raise
+    return out
+
+
+def cgroup_memory_mb():
+    """Three quarters of the memory the container is given, or None when that is not told (or is unlimited)."""
+    for path in ("/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory/memory.limit_in_bytes"):
+        try:
+            with open(path) as f:
+                n = int(f.read().strip())
+        except (OSError, ValueError):
+            continue
+        if 0 < n < 1 << 50:
+            return max(64, (n >> 20) * 3 // 4)
+    return None
+
+
+def limit_memory(mb):
+    """Cap the address space, so that a file that needs more fails with exit 5 and a message, instead of being killed by
+    the run's memory limit with nothing said."""
+    mb = mb or min(MAX_MEMORY_MB, cgroup_memory_mb() or MAX_MEMORY_MB)
+    try:
+        import resource
+
+        _, hard = resource.getrlimit(resource.RLIMIT_AS)
+        soft = mb << 20
+        resource.setrlimit(resource.RLIMIT_AS, (soft if hard == resource.RLIM_INFINITY else min(soft, hard), hard))
+    except (ImportError, ValueError, OSError):
+        pass  # the run's own memory limit still applies
+
+
+def main(argv):
+    if len(argv) == 2 and argv[1] in ("-h", "--help"):
+        print(USAGE)
+        return EXIT["ok"]
+
+    class Args(argparse.ArgumentParser):
+        def error(self, message):
+            raise Fail("usage", message)
+
+    parser = Args(add_help=False)
+    parser.add_argument("file")
+    parser.add_argument("-o", "--out", required=True)
+    parser.add_argument("--max-rows", type=int, default=10000)
+    parser.add_argument("--max-cols", type=int, default=200)
+    parser.add_argument("--max-output-mb", type=int, default=64)
+    parser.add_argument("--max-memory-mb", type=int)
+    try:
+        args = parser.parse_args(argv[1:])
+        if min(args.max_rows, args.max_cols, args.max_output_mb) < 1:
+            raise Fail("usage", "limits must be positive")
+        limit_memory(args.max_memory_mb)
+        out = convert(args)
+    except Fail as err:
+        if err.kind == "usage":
+            print(USAGE, file=sys.stderr)
+            return EXIT["usage"]
+        print(f"ooxml2md: error: {err.kind}: {err}", file=sys.stderr)
+        return EXIT[err.kind]
+    except (MemoryError, RecursionError) as err:
+        print(f"ooxml2md: error: limits: {type(err).__name__}: the file needs more memory or nesting than is allowed", file=sys.stderr)
+        return EXIT["limits"]
+    except (zipfile.BadZipFile, ET.ParseError, EOFError, KeyError, ValueError, UnicodeError) as err:
+        print(f"ooxml2md: error: corrupt: {type(err).__name__}: {str(err)[:200]}", file=sys.stderr)
+        return EXIT["corrupt"]
+    except Exception as err:  # anything else is reported, never mistaken for a result
+        print(f"ooxml2md: error: internal: {type(err).__name__}: {str(err)[:200]}", file=sys.stderr)
+        return EXIT["internal"]
+    if args.out != "-":
+        print(f"wrote {args.out}: {out.size} bytes, {out.content} characters of text")
+    return EXIT["ok"]
+
+
+if __name__ == "__main__":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+    sys.exit(main(sys.argv))

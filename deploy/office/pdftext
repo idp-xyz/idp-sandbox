@@ -15,6 +15,7 @@ MAX_BYTES = 12000  # printed unless --max-bytes says otherwise: idp-host hands a
 SECONDS = 12       # a sandbox run has a time limit (20 s by default): stop reading before it, and say where
 
 USAGE = """usage: pdftext FILE.pdf [--pages 1-3,7] [--layout] [--max-bytes N] [-o OUT.txt] [--password PW]
+       pdftext FILE.pdf --markdown OUT.md [--pages 1-3,7] [--layout] [--password PW]
        pdftext --check FILE.pdf
 
   --pages      the pages to read, for example 3, 2-5, 7- or 1,4,9-12 (default: from page 1)
@@ -22,11 +23,22 @@ USAGE = """usage: pdftext FILE.pdf [--pages 1-3,7] [--layout] [--max-bytes N] [-
   --max-bytes  how much text to print, in bytes of UTF-8 (default 12000; 0 = no limit)
   -o OUT       write the text of the pages to OUT instead (no size limit) and print only a summary
   --password   the password of a protected file
+  --markdown   write every page to OUT.md, each after a <!-- page: N --> line, with no limit on size or time (the limit
+               of the run governs); a page without text gets a <!-- no-text: page N ... --> line. OUT.md exists only
+               when it is complete and has text. Exit: 0 written; 1 other error; 2 usage; 3 unsupported (a password
+               is needed or wrong); 4 corrupt; 5 limits exceeded; 6 no text on any page (a scan). Every other mode
+               exits 0 or 1
   --check      only say how many pages the file has; exit 1 when it cannot be opened"""
 
 
+MAX_MARKDOWN = 64 << 20  # bytes of a --markdown result
+CODES = {"internal": 1, "usage": 2, "unsupported": 3, "corrupt": 4, "limits": 5, "empty": 6}
+
+
 class Failure(Exception):
-    pass
+    def __init__(self, message, kind="internal"):
+        super().__init__(message)
+        self.kind = kind
 
 
 class Arguments(argparse.ArgumentParser):
@@ -46,13 +58,13 @@ def parse_pages(spec, count):
     for part in spec.split(","):
         m = re.fullmatch(r"\s*(\d*)\s*(-?)\s*(\d*)\s*", part)
         if not m or not (m.group(1) or m.group(3)):
-            raise Failure(f"--pages {spec}: write pages as 3, 2-5, 7- or 1,4,9-12")
+            raise Failure(f"--pages {spec}: write pages as 3, 2-5, 7- or 1,4,9-12", "usage")
         first = int(m.group(1)) if m.group(1) else 1
         last = int(m.group(3)) if m.group(3) else (count if m.group(2) else first)
         if first < 1 or last < first:
-            raise Failure(f"--pages {spec}: write pages as 3, 2-5, 7- or 1,4,9-12")
+            raise Failure(f"--pages {spec}: write pages as 3, 2-5, 7- or 1,4,9-12", "usage")
         if first > count:
-            raise Failure(f"there is no page {first}: the file has {plural(count, 'page')}")
+            raise Failure(f"there is no page {first}: the file has {plural(count, 'page')}", "usage")
         out.extend(range(first - 1, min(last, count)))
     return out
 
@@ -85,15 +97,15 @@ def open_pdf(path, password):
         reader = pypdf.PdfReader(path, strict=False)
         if reader.is_encrypted and not reader.decrypt(password or ""):
             if password:
-                raise Failure(f"{path}: that is not the file's password")
-            raise Failure(f"{path} is protected by a password; give it with --password")
+                raise Failure(f"{path}: that is not the file's password", "unsupported")
+            raise Failure(f"{path} is protected by a password; give it with --password", "unsupported")
         count = len(reader.pages)
     except Failure:
         raise
     except DependencyError as err:
-        raise Failure(f"{path} is encrypted in a way this sandbox cannot open ({err})")
+        raise Failure(f"{path} is encrypted in a way this sandbox cannot open ({err})", "unsupported")
     except (PyPdfError, OSError, ValueError, KeyError, TypeError, AttributeError, RecursionError) as err:
-        raise Failure(f"{path} is not a PDF file that can be read ({type(err).__name__}: {str(err)[:120]})")
+        raise Failure(f"{path} is not a PDF file that can be read ({type(err).__name__}: {str(err)[:120]})", "corrupt")
     return reader, count
 
 
@@ -126,6 +138,67 @@ def cut(text, room):
     return text.encode("utf-8")[:room].decode("utf-8", "ignore")
 
 
+def write_markdown(args, reader, pages):
+    """Every page into OUT.md.part; returns (characters, pages without text)."""
+    chars, without, size = 0, [], 0
+    part = args.markdown + ".part"
+    try:
+        parent = os.path.dirname(args.markdown)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(part, "w", encoding="utf-8", newline="\n") as f:
+            for index in pages:
+                number = index + 1
+                text, why = page_text(reader.pages[index], args.layout)
+                lines = [f"<!-- page: {number} -->"]
+                if text:
+                    lines.append(text.replace("<!--", "&lt;!--"))
+                    chars += len(text.strip())
+                else:
+                    without.append(number)
+                    lines.append(f"<!-- no-text: page {number}, {why} -->")
+                block = "\n".join(lines) + "\n\n"
+                size += len(block.encode("utf-8"))
+                if size > MAX_MARKDOWN:
+                    raise Failure(f"the result is larger than {MAX_MARKDOWN >> 20} MiB (stopped at page {number})", "limits")
+                f.write(block)
+    except BaseException:
+        try:
+            os.unlink(part)  # our own temporary file
+        except OSError:
+            pass
+        raise
+    return chars, without, part
+
+
+def markdown(args):
+    """--markdown: the whole file as Markdown with page markers, or a failure and no file."""
+    try:
+        try:
+            reader, count = open_pdf(args.file, args.password)
+            if count < 1:
+                raise Failure(f"{args.file} has no pages", "corrupt")
+            pages = parse_pages(args.pages, count)
+            chars, without, part = write_markdown(args, reader, pages)
+        except OSError as err:
+            raise Failure(f"{args.markdown}: {err.strerror or err}")
+        except (MemoryError, RecursionError) as err:
+            raise Failure(f"{type(err).__name__}: the file needs more memory than is allowed", "limits")
+        if not chars:
+            os.unlink(part)
+            raise Failure(f"no text on any of the {plural(len(pages), 'page')}: the file is a scan, and there is no OCR here", "empty")
+        os.replace(part, args.markdown)
+    except Failure as err:
+        print(f"pdftext: error: {err.kind}: {err}", file=sys.stderr)
+        return CODES[err.kind]
+    except Exception as err:  # never mistaken for a result
+        print(f"pdftext: error: internal: {type(err).__name__}: {str(err)[:200]}", file=sys.stderr)
+        return CODES["internal"]
+    note = f"; no text on {'page' if len(without) == 1 else 'pages'} {spans(without)}" if without else ""
+    print(f"wrote {args.markdown}: {plural(len(pages), 'page')}, {chars} characters{note}")
+    return 0
+
+
 def main(argv):
     if len(argv) == 2 and argv[1] in ("-h", "--help"):
         print(USAGE)
@@ -138,13 +211,16 @@ def main(argv):
     parser.add_argument("-o", "--out")
     parser.add_argument("--password")
     parser.add_argument("--check", action="store_true")
+    parser.add_argument("--markdown")
     try:
         args = parser.parse_args(argv[1:])
-        if args.max_bytes < 0:
+        if args.max_bytes < 0 or (args.markdown and (args.out or args.check)):
             raise Failure("usage")
     except Failure:
         print(USAGE, file=sys.stderr)
         return 2
+    if args.markdown:
+        return markdown(args)
     name = os.path.basename(args.file)
     try:
         reader, count = open_pdf(args.file, args.password)

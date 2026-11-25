@@ -13,6 +13,9 @@ RUN --mount=type=bind,source=wheels,target=/wheels \
     pip install --no-index --no-deps --no-cache-dir --disable-pip-version-check --root-user-action=ignore /wheels/*.whl && pip check
 COPY fonts/ /usr/share/fonts/truetype/noto/
 COPY pdftext md2pdf /usr/local/bin/
+# Word, PowerPoint and Excel as Markdown with locators, and a PDF as Markdown with page markers (ADR-0001 D25): the
+# converters the knowledge-base ingestion runs; ooxml2md shares the workbook helpers of sheetmap (sheetlib.py, above)
+COPY ooxml2md /usr/local/bin/
 # Runs have no network, a read-only root, HOME=/tmp and a fresh container each time:
 #   no update checks and no installs; no resident process (it would die with the run, unflushed), and when an agent opens
 #   one anyway (officecli open, which its own references recommend) every change is flushed at once; no .NET diagnostics
